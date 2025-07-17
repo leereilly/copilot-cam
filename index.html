@@ -16,11 +16,26 @@
             padding: 5px 10px;
             border-radius: 5px;
             font-family: Arial, sans-serif;
+            z-index: 100;
+            transition: opacity 0.5s;
+        }
+        #webcamVideo {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 160px;
+            height: 120px;
+            border: 2px solid white;
+            border-radius: 5px;
+            display: none;
         }
     </style>
 </head>
 <body>
     <div class="loading-info" id="loadingInfo">Loading model...</div>
+    <video id="webcamVideo" autoplay playsinline muted></video>
+    <!-- Include the script at the end of the body for better performance -->
+    <script src="share-modal.js" defer></script>
     <script type="importmap">
         {
             "imports": {
@@ -46,7 +61,6 @@
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(window.devicePixelRatio);
-        // THREE.sRGBEncoding is deprecated, using the new property
         renderer.outputColorSpace = THREE.SRGBColorSpace;
         renderer.shadowMap.enabled = true;
         renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -77,41 +91,304 @@
         controls.enableDamping = true;
         controls.dampingFactor = 0.05;
 
-        // Load environment map for reflective material
-        const pmremGenerator = new THREE.PMREMGenerator(renderer);
-        pmremGenerator.compileEquirectangularShader();
+        // Initialize webcam
+        const webcamVideo = document.getElementById('webcamVideo');
+        const webcamTexture = new THREE.VideoTexture(webcamVideo);
+        webcamTexture.minFilter = THREE.LinearFilter;
+        webcamTexture.magFilter = THREE.LinearFilter;
+        webcamTexture.format = THREE.RGBAFormat;
         
-        // Create a metal material
+        // Use webcam as environment map
+        const pmremGenerator = new THREE.PMREMGenerator(renderer);
+        let envMap;
+        
+        // Mode tracking
+        let currentMode = 'reflection'; // 'reflection' or 'texture'
+        
+        // Initialize metal material with webcam reflection
         const createMetalMaterial = () => {
             return new THREE.MeshStandardMaterial({
                 color: 0xC0C0C0, // Silver color
-                metalness: 1.0,
-                roughness: 0.2,
-                envMapIntensity: 1.0
+                metalness: 0.9,
+                roughness: 0.1,
+                envMap: envMap,
+                envMapIntensity: 1.5,
+                clearcoat: 0.5,
+                clearcoatRoughness: 0.1
             });
         };
         
-        // Apply metal material to all meshes in a model
-        const applyMetalToModel = (model) => {
+        // Initialize video texture material
+        const createVideoMaterial = () => {
+            return new THREE.MeshStandardMaterial({
+                map: webcamTexture,
+                metalness: 0.3,
+                roughness: 0.5,
+                envMap: envMap,
+                envMapIntensity: 0.3,
+                side: THREE.DoubleSide,
+                transparent: false,
+                opacity: 1.0
+            });
+        };
+        
+        // Metal materials array to update
+        const modelMaterials = [];
+        
+        // Apply material to all meshes in a model
+        const applyMaterialToModel = (model, materialType) => {
             model.traverse((child) => {
                 if (child.isMesh) {
-                    child.material = createMetalMaterial();
+                    let material;
+                    if (materialType === 'metal') {
+                        material = createMetalMaterial();
+                    } else if (materialType === 'video') {
+                        material = createVideoMaterial();
+                    }
+                    
+                    child.material = material;
+                    modelMaterials.push({
+                        mesh: child,
+                        material: material
+                    });
                     child.castShadow = true;
                     child.receiveShadow = true;
                 }
             });
         };
 
-        // Load environment texture for reflections
-        new THREE.TextureLoader().load(
-            'https://threejs.org/examples/textures/2294472375_24a3b8ef46_o.jpg', 
-            function(texture) {
-                const envMap = pmremGenerator.fromEquirectangular(texture).texture;
-                scene.environment = envMap;
-                texture.dispose();
-                pmremGenerator.dispose();
+        // Function to load static environment map as fallback
+        function useStaticEnvironmentMap() {
+            console.log("Using static environment map as fallback");
+            new THREE.TextureLoader().load(
+                'https://threejs.org/examples/textures/2294472375_24a3b8ef46_o.jpg', 
+                function(texture) {
+                    const envMapTexture = pmremGenerator.fromEquirectangular(texture).texture;
+                    scene.environment = envMapTexture;
+                    envMap = envMapTexture;
+                    texture.dispose();
+                }
+            );
+        }
+        
+        // Create dynamic environment map from webcam feed
+        function updateEnvironmentMap() {
+            try {
+                // Only update if video is actually playing
+                if (webcamVideo.readyState === webcamVideo.HAVE_ENOUGH_DATA) {
+                    webcamTexture.needsUpdate = true;
+                    
+                    // Debug webcam status every few seconds
+                    if (Math.random() < 0.01) { // ~1% chance each frame = occasional logging
+                        console.log("Webcam active, dimensions:", webcamVideo.videoWidth, "x", webcamVideo.videoHeight);
+                        console.log("Video texture update status:", webcamTexture.needsUpdate);
+                    }
+                    
+                    try {
+                        const webcamCubeRenderTarget = pmremGenerator.fromEquirectangular(webcamTexture);
+                        envMap = webcamCubeRenderTarget.texture;
+                        scene.environment = envMap;
+                        
+                        // Update all materials with new environment map (only in reflection mode)
+                        if (currentMode === 'reflection') {
+                            modelMaterials.forEach(item => {
+                                if (item.mesh && item.mesh.material) {
+                                    item.mesh.material.envMap = envMap;
+                                    item.mesh.material.needsUpdate = true;
+                                }
+                            });
+                        }
+                        
+                        webcamCubeRenderTarget.dispose();
+                    } catch (renderError) {
+                        console.error("Error generating environment map from webcam:", renderError);
+                        // If we fail to create environment map from webcam, fall back to static
+                        useStaticEnvironmentMap();
+                        // Stop trying to update from webcam
+                        return;
+                    }
+                } else {
+                    console.log("Waiting for video data, current state:", webcamVideo.readyState);
+                }
+                
+                // Continue updating
+                requestAnimationFrame(updateEnvironmentMap);
+            } catch (error) {
+                console.error("Fatal error updating environment map:", error);
+                // Fall back to static environment map
+                useStaticEnvironmentMap();
             }
-        );
+        }
+        
+        // Start webcam with explicit user interaction
+        function startWebcam() {
+            const startButton = document.getElementById('startButton');
+            startButton.style.display = 'none';
+            
+            console.log("Starting webcam access...");
+            
+            // Check for secure context
+            if (window.isSecureContext === false) {
+                console.warn("Not in a secure context - webcam might not work");
+                loadingInfo.innerHTML = "Warning: Site not in secure context. Webcam may not work. Try using HTTPS or localhost.";
+                loadingInfo.style.opacity = '1';
+                loadingInfo.style.display = 'block';
+            }
+            
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                // Add loading message
+                loadingInfo.innerHTML = "Requesting webcam access...";
+                loadingInfo.style.opacity = '1';
+                loadingInfo.style.display = 'block';
+                
+                // Try different constraints - ordered from most likely to work to least
+                const constraints = [
+                    { video: true, audio: false },
+                    { video: { width: { ideal: 640 }, height: { ideal: 480 } }, audio: false },
+                    { video: { facingMode: "user" }, audio: false },
+                    { video: { facingMode: "environment" }, audio: false }
+                ];
+                
+                // Print out available devices for debugging
+                navigator.mediaDevices.enumerateDevices()
+                    .then(devices => {
+                        const videoDevices = devices.filter(device => device.kind === 'videoinput');
+                        console.log(`Found ${videoDevices.length} video devices:`, videoDevices);
+                        console.log("Current location: " + window.location.href);
+                        console.log("Is secure context: " + window.isSecureContext);
+                        
+                        // Additional debugging for permissions
+                        if (navigator.permissions) {
+                            navigator.permissions.query({ name: 'camera' })
+                                .then(permissionStatus => {
+                                    console.log("Camera permission status:", permissionStatus.state);
+                                    
+                                    permissionStatus.onchange = () => {
+                                        console.log("Camera permission changed to:", permissionStatus.state);
+                                    };
+                                })
+                                .catch(err => {
+                                    console.log("Error checking camera permission:", err);
+                                });
+                        } else {
+                            console.log("Permissions API not available");
+                        }
+                        
+                        if (videoDevices.length === 0) {
+                            console.error("No video devices found");
+                            loadingInfo.innerHTML = "No camera found on this device. Using static reflections instead.<br>Make sure you allow camera access and are using a secure context (https or localhost).";
+                            loadingInfo.style.display = 'block';
+                            loadingInfo.style.opacity = '1';
+                            useStaticEnvironmentMap();
+                            startButton.textContent = "No Camera Available";
+                            startButton.style.opacity = "0.5";
+                            startButton.style.display = 'block';
+                            setTimeout(() => {
+                                loadingInfo.style.opacity = '0';
+                            }, 5000);
+                            return;
+                        }
+                        
+                        // Try each constraint until one works
+                        tryConstraints(constraints, 0);
+                    })
+                    .catch(err => {
+                        console.error("Error enumerating devices:", err);
+                        // Still try to access webcam even if enumeration fails
+                        tryConstraints(constraints, 0);
+                    });
+                
+                function tryConstraints(constraintList, index) {
+                    if (index >= constraintList.length) {
+                        // All constraints failed, show error
+                        console.error("No camera could be accessed after trying all options");
+                        loadingInfo.innerHTML = "Could not access any camera. Using static reflections instead.";
+                        useStaticEnvironmentMap();
+                        startButton.textContent = "Camera Access Failed";
+                        startButton.style.opacity = "0.5";
+                        startButton.style.display = 'block';
+                        setTimeout(() => {
+                            loadingInfo.style.opacity = '0';
+                        }, 3000);
+                        return;
+                    }
+                    
+                    console.log(`Trying constraint set ${index}:`, constraintList[index]);
+                    
+                    navigator.mediaDevices.getUserMedia(constraintList[index])
+                        .then(function(stream) {
+                            console.log("Webcam access granted with constraint set", index);
+                            
+                            // Ensure video tracks are enabled and active
+                            const videoTracks = stream.getVideoTracks();
+                            if (videoTracks.length === 0) {
+                                console.error("No video tracks in stream");
+                                throw new Error("No video tracks found");
+                            }
+                            
+                            console.log("Video tracks:", videoTracks);
+                            
+                            // Assign the stream to the video element
+                            webcamVideo.srcObject = stream;
+                            
+                            // Using both play() and the onloadedmetadata event for better compatibility
+                            webcamVideo.onloadedmetadata = function() {
+                                webcamVideo.play()
+                                    .then(() => {
+                                        console.log("Video playback started");
+                                        // Show webcam feed in corner
+                                        webcamVideo.style.display = 'block';
+                                        
+                                        // Apply video texture to all models
+                                        modelMaterials.forEach(item => {
+                                            const videoMaterial = createVideoMaterial();
+                                            item.mesh.material = videoMaterial;
+                                        });
+                                        
+                                        loadingInfo.innerHTML = "Webcam activated and applied as texture successfully!";
+                                        loadingInfo.style.opacity = '1';
+                                        loadingInfo.style.display = 'block';
+                                        setTimeout(() => {
+                                            loadingInfo.style.opacity = '0';
+                                        }, 3000);
+                                        
+                                        // Start environment map updates
+                                        updateEnvironmentMap();
+                                    })
+                                    .catch(e => {
+                                        console.error("Error playing video:", e);
+                                        loadingInfo.innerHTML = "Error starting video playback. Using static reflections.";
+                                        useStaticEnvironmentMap();
+                                        startButton.style.display = 'block';
+                                    });
+                            };
+                            
+                            webcamVideo.onerror = function() {
+                                console.error("Video element error:", webcamVideo.error);
+                                throw new Error("Video element error: " + webcamVideo.error);
+                            };
+                        })
+                        .catch(function(error) {
+                            console.error(`Error with constraint set ${index}:`, error);
+                            // Try the next constraint
+                            tryConstraints(constraintList, index + 1);
+                        });
+                }
+            } else {
+                console.warn("MediaDevices interface not supported");
+                loadingInfo.innerHTML = "Your browser doesn't support webcam access. Using static reflections instead.";
+                useStaticEnvironmentMap();
+                startButton.textContent = "No Camera Support";
+                startButton.style.opacity = "0.5";
+                startButton.style.display = 'block';
+                setTimeout(() => {
+                    loadingInfo.style.opacity = '0';
+                }, 3000);
+            }
+        }
+        
+        // Initialize with static environment map first
+        useStaticEnvironmentMap();
         
         // Load GLB model
         const loadingInfo = document.getElementById('loadingInfo');
@@ -126,19 +403,19 @@
                 const modelGroup = new THREE.Group();
                 scene.add(modelGroup);
                 
-                // Add the original model to the group
+                // Store models for later material updates
                 const originalModel = gltf.scene.clone();
-                applyMetalToModel(originalModel);
-                modelGroup.add(originalModel);
-                
-                // Create a mirrored copy of the model
                 const mirroredModel = gltf.scene.clone();
-                applyMetalToModel(mirroredModel);
+                
+                // Apply video texture material by default
+                applyMaterialToModel(originalModel, 'video');
+                applyMaterialToModel(mirroredModel, 'video');
                 
                 // Apply a scaling transformation to mirror across the YZ plane (flip X axis)
                 mirroredModel.scale.set(-1, 1, 1);
                 
-                // Add the mirrored model to the group
+                // Add models to the group
+                modelGroup.add(originalModel);
                 modelGroup.add(mirroredModel);
                 
                 // Center the entire group
@@ -194,11 +471,70 @@
         // Animation loop
         function animate() {
             requestAnimationFrame(animate);
+            
+            // Always update video texture if webcam has data
+            if (webcamVideo.readyState === webcamVideo.HAVE_ENOUGH_DATA) {
+                webcamTexture.needsUpdate = true;
+            }
+            
             controls.update(); // required if controls.enableDamping = true
             renderer.render(scene, camera);
         }
 
         animate();
+        
+        // Set default mode to texture so video is visible on the model
+        currentMode = 'texture'; 
+        
+        // Automatically start webcam after page loads
+        window.addEventListener('DOMContentLoaded', () => {
+            // Give the page a moment to initialize
+            setTimeout(() => {
+                startWebcam();
+            }, 1000);
+        });
+        
+        // Function to toggle between reflection and texture modes
+        function toggleMode() {
+            const toggleModeButton = document.getElementById('toggleModeButton');
+            
+            if (currentMode === 'reflection') {
+                // Switch to texture mode
+                currentMode = 'texture';
+                toggleModeButton.textContent = "Switch to Reflection Mode";
+                
+                // Change all materials to video texture
+                modelMaterials.forEach(item => {
+                    const videoMaterial = createVideoMaterial();
+                    item.mesh.material = videoMaterial;
+                });
+                
+                loadingInfo.innerHTML = "Video texture mode enabled. Your webcam is now applied as a texture.";
+                loadingInfo.style.opacity = '1';
+                loadingInfo.style.display = 'block';
+                setTimeout(() => {
+                    loadingInfo.style.opacity = '0';
+                }, 3000);
+                
+            } else {
+                // Switch back to reflection mode
+                currentMode = 'reflection';
+                toggleModeButton.textContent = "Switch to Texture Mode";
+                
+                // Change all materials back to metal
+                modelMaterials.forEach(item => {
+                    const metalMaterial = createMetalMaterial();
+                    item.mesh.material = metalMaterial;
+                });
+                
+                loadingInfo.innerHTML = "Reflection mode enabled. Your webcam provides environmental reflections.";
+                loadingInfo.style.opacity = '1';
+                loadingInfo.style.display = 'block';
+                setTimeout(() => {
+                    loadingInfo.style.opacity = '0';
+                }, 3000);
+            }
+        }
     </script>
 </body>
 </html>
