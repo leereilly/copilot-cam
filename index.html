@@ -36,6 +36,10 @@
 <body>
     <div class="loading-info" id="loadingInfo">Loading model...</div>
     <video id="webcamVideo" autoplay playsinline muted></video>
+    <video id="mp4Video" autoplay playsinline muted loop preload="auto" style="position: absolute; top: 140px; right: 10px; width: 160px; height: 120px; border: 2px solid red; z-index: 200;">
+        <source src="vid.mp4" type="video/mp4">
+        Your browser does not support the video tag.
+    </video>
     <!-- Include the script at the end of the body for better performance -->
     <script src="share-modal.js" defer></script>
     <script type="importmap">
@@ -123,6 +127,7 @@
                         name: materialInfo.meshName,
                         index: materialInfo.meshIndex,
                         isLeftLens: materialInfo.isLeftLens,
+                        isRightLens: materialInfo.isRightLens,
                         isEyes: materialInfo.isEyes,
                         vertices: clickedMesh.geometry?.attributes?.position?.count
                     });
@@ -143,6 +148,107 @@
         webcamTexture.wrapT = THREE.ClampToEdgeWrapping; // Changed from RepeatWrapping
         // Don't flip the webcam texture - we'll handle orientation in UV mapping
         webcamTexture.flipY = false;
+        
+        // Initialize MP4 video
+        const mp4Video = document.getElementById('mp4Video');
+        let mp4Texture = null; // Don't create texture until video is ready
+        
+        // Add event listeners for MP4 video debugging
+        mp4Video.addEventListener('loadstart', () => {
+            console.log('MP4: Load started');
+            console.log('MP4 properties:', {
+                src: mp4Video.src,
+                currentSrc: mp4Video.currentSrc,
+                readyState: mp4Video.readyState,
+                networkState: mp4Video.networkState
+            });
+        });
+        mp4Video.addEventListener('loadeddata', () => {
+            console.log('MP4: Data loaded');
+            console.log('MP4 dimensions:', mp4Video.videoWidth, 'x', mp4Video.videoHeight);
+            // Create texture now that data is loaded
+            if (!mp4Texture) {
+                mp4Texture = new THREE.VideoTexture(mp4Video);
+                mp4Texture.minFilter = THREE.LinearFilter;
+                mp4Texture.magFilter = THREE.LinearFilter;
+                mp4Texture.format = THREE.RGBAFormat;
+                mp4Texture.wrapS = THREE.ClampToEdgeWrapping;
+                mp4Texture.wrapT = THREE.ClampToEdgeWrapping;
+                mp4Texture.flipY = false;
+                console.log('🎬 MP4 texture created');
+            }
+            // Try to update right lens material now that data is loaded
+            setTimeout(() => updateRightLensWithMp4(), 100);
+        });
+        mp4Video.addEventListener('canplay', () => {
+            console.log('MP4: Can play');
+            console.log('MP4 readyState:', mp4Video.readyState, 'dimensions:', mp4Video.videoWidth, 'x', mp4Video.videoHeight);
+            // Create texture if not already created
+            if (!mp4Texture) {
+                mp4Texture = new THREE.VideoTexture(mp4Video);
+                mp4Texture.minFilter = THREE.LinearFilter;
+                mp4Texture.magFilter = THREE.LinearFilter;
+                mp4Texture.format = THREE.RGBAFormat;
+                mp4Texture.wrapS = THREE.ClampToEdgeWrapping;
+                mp4Texture.wrapT = THREE.ClampToEdgeWrapping;
+                mp4Texture.flipY = false;
+                console.log('🎬 MP4 texture created on canplay');
+            }
+            // Update right lens material when video can play
+            updateRightLensWithMp4();
+        });
+        mp4Video.addEventListener('canplaythrough', () => console.log('MP4: Can play through'));
+        mp4Video.addEventListener('playing', () => {
+            console.log('MP4: Playing');
+            console.log('MP4 playing state:', {
+                currentTime: mp4Video.currentTime,
+                duration: mp4Video.duration,
+                paused: mp4Video.paused,
+                ended: mp4Video.ended
+            });
+            // Create texture if not already created
+            if (!mp4Texture) {
+                mp4Texture = new THREE.VideoTexture(mp4Video);
+                mp4Texture.minFilter = THREE.LinearFilter;
+                mp4Texture.magFilter = THREE.LinearFilter;
+                mp4Texture.format = THREE.RGBAFormat;
+                mp4Texture.wrapS = THREE.ClampToEdgeWrapping;
+                mp4Texture.wrapT = THREE.ClampToEdgeWrapping;
+                mp4Texture.flipY = false;
+                console.log('🎬 MP4 texture created on playing');
+            }
+            // Update right lens material when video starts playing
+            updateRightLensWithMp4();
+        });
+        mp4Video.addEventListener('error', (e) => {
+            console.error('MP4 Error:', e, mp4Video.error);
+            if (mp4Video.error) {
+                console.error('MP4 Error details:', {
+                    code: mp4Video.error.code,
+                    message: mp4Video.error.message
+                });
+            }
+        });
+        mp4Video.addEventListener('stalled', () => console.log('MP4: Stalled'));
+        mp4Video.addEventListener('suspend', () => console.log('MP4: Suspend'));
+        mp4Video.addEventListener('abort', () => console.log('MP4: Abort'));
+        
+        // Try to start the MP4 video immediately
+        mp4Video.load(); // Explicitly load the video
+        
+        // Debug the MP4 video element properties
+        console.log('MP4 Video Element Debug:', {
+            autoplay: mp4Video.autoplay,
+            loop: mp4Video.loop,
+            muted: mp4Video.muted,
+            preload: mp4Video.preload,
+            src: mp4Video.src,
+            currentSrc: mp4Video.currentSrc,
+            readyState: mp4Video.readyState,
+            networkState: mp4Video.networkState,
+            paused: mp4Video.paused,
+            ended: mp4Video.ended
+        });
         
         // Use webcam as environment map
         const pmremGenerator = new THREE.PMREMGenerator(renderer);
@@ -212,6 +318,44 @@
             });
         };
         
+        // Create MP4 video material for right lens
+        const createMp4VideoMaterial = () => {
+            // Only create the material if the video is ready and texture exists
+            if (mp4Video.readyState < 2 || !mp4Texture) { // HAVE_CURRENT_DATA
+                console.log("MP4 video not ready yet or texture not created, using metal material as fallback");
+                return createMetalMaterial();
+            }
+            
+            // Use the MP4 texture directly
+            const texture = mp4Texture.clone();
+            texture.needsUpdate = true;
+            
+            // Fix upside-down video by flipping vertically
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.y = -1; // Flip vertically to fix upside-down video
+            texture.offset.y = 1;  // Adjust offset to compensate
+            
+            // For the mirrored side, flip the texture horizontally to counteract the geometric mirroring
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.repeat.x = -1; // Flip horizontally for mirrored mesh
+            texture.offset.x = 1;  // Adjust offset to compensate
+            
+            const material = new THREE.MeshStandardMaterial({
+                map: texture,
+                metalness: 0.0,  // Reduced metalness for better video visibility
+                roughness: 0.1,  // Lower roughness for clearer video
+                side: THREE.DoubleSide,
+                transparent: false,
+                opacity: 1.0,
+                emissive: new THREE.Color(0x111111), // Slight emissive to make video more visible
+                emissiveMap: texture,
+                emissiveIntensity: 0.3
+            });
+            
+            console.log("✓ MP4 video material created successfully");
+            return material;
+        };
+        
         // Animation time for synthwave effect
         let synthwaveTime = 0;
         
@@ -222,6 +366,30 @@
         let sharedVideoMaterial = null;
         let sharedMetalMaterial = null;
         let sharedSynthwaveEyesMaterial = null;
+        let sharedMp4VideoMaterial = null;
+        
+        // Function to update right lens with MP4 video material once video is ready
+        function updateRightLensWithMp4() {
+            if (mp4Video.readyState >= 2 && mp4Texture) { // HAVE_CURRENT_DATA and texture exists
+                console.log("🎥 MP4 video is ready, updating right lens material");
+                
+                // Create the MP4 video material now that video is ready
+                const mp4VideoMaterial = createMp4VideoMaterial();
+                sharedMp4VideoMaterial = mp4VideoMaterial;
+                
+                // Find and update all right lens meshes
+                modelMaterials.forEach(item => {
+                    if (item.isRightLens) {
+                        item.mesh.material = mp4VideoMaterial;
+                        item.material = mp4VideoMaterial;
+                        console.log("✓ Updated right lens with MP4 video material:", item.meshName);
+                    }
+                });
+                
+                return true; // Successfully updated
+            }
+            return false; // Not ready yet
+        }
         
         // Apply material to all meshes in a model
         const applyMaterialToModel = (model, materialType, isMirrored = false) => {
@@ -437,7 +605,7 @@
                                         }
                                                         // Apply the same material to all parts for seamless texture
                         modelMaterials.forEach(item => {
-                            // Apply appropriate materials: video to left lens, synthwave to eyes, metal to others
+                            // Apply appropriate materials: video to left lens, MP4 to right lens, synthwave to eyes, metal to others
                             if (item.isEyes) {
                                 // Eyes always keep their synthwave glow
                                 if (!sharedSynthwaveEyesMaterial) {
@@ -449,6 +617,13 @@
                                 const videoMaterial = createVideoMaterial(false);
                                 item.mesh.material = videoMaterial;
                                 item.material = videoMaterial;
+                            } else if (item.isRightLens) {
+                                // Right lens keeps the MP4 video
+                                if (!sharedMp4VideoMaterial) {
+                                    sharedMp4VideoMaterial = createMp4VideoMaterial();
+                                }
+                                item.mesh.material = sharedMp4VideoMaterial;
+                                item.material = sharedMp4VideoMaterial;
                             } else {
                                 if (!sharedMetalMaterial) {
                                     sharedMetalMaterial = createMetalMaterial();
@@ -578,14 +753,19 @@
                     }
                 });
                 
-                // Apply materials to the mirrored model (all default material except Eyes)
+                // Apply materials to the mirrored model (Metal initially, MP4 video will be applied once ready)
                 mirroredModel.traverse((child) => {
                     if (child.isMesh) {
                         const isEyes = child.name === 'Eyes';
+                        const isRightLens = child.name === 'Glass'; // Right lens is the Glass mesh on the mirrored model
                         
                         if (isEyes) {
                             child.material = sharedSynthwaveEyesMaterial;
                             console.log("✨ Applied synthwave glow material to mirrored Eyes:", child.name);
+                        } else if (isRightLens) {
+                            // Start with metal material, will update to MP4 once video is ready
+                            child.material = defaultMaterial;
+                            console.log("🎬 Applied temporary metal material to right lens (will update to MP4):", child.name);
                         } else {
                             child.material = defaultMaterial;
                         }
@@ -595,7 +775,10 @@
                             material: child.material,
                             isMirrored: true,
                             isLeftLens: false,
-                            isEyes: isEyes
+                            isRightLens: isRightLens,
+                            isEyes: isEyes,
+                            meshIndex: modelMaterials.length,
+                            meshName: child.name
                         });
                         child.castShadow = true;
                         child.receiveShadow = true;
@@ -733,6 +916,19 @@
                 webcamTexture.needsUpdate = true;
             }
             
+            // Always update MP4 video texture if it has data and texture exists
+            if (mp4Texture && mp4Video.readyState >= 2 && mp4Video.videoWidth > 0 && mp4Video.videoHeight > 0) {
+                mp4Texture.needsUpdate = true;
+                
+                // Debug MP4 status occasionally
+                if (Math.random() < 0.005) { // ~0.5% chance each frame = occasional logging
+                    console.log("MP4 active, dimensions:", mp4Video.videoWidth, "x", mp4Video.videoHeight);
+                    console.log("MP4 current time:", mp4Video.currentTime, "duration:", mp4Video.duration);
+                }
+            } else if (Math.random() < 0.01) {
+                console.log("MP4 waiting for data, current state:", mp4Video.readyState, "dimensions:", mp4Video.videoWidth, "x", mp4Video.videoHeight, "texture exists:", !!mp4Texture);
+            }
+            
             controls.update(); // required if controls.enableDamping = true
             renderer.render(scene, camera);
         }
@@ -742,11 +938,76 @@
         // Set default mode to texture so video is visible on the model
         currentMode = 'texture'; 
         
+        // Debug function to manually start MP4 video (can be called from console)
+        window.startMp4Video = function() {
+            console.log("🎬 Manually starting MP4 video...");
+            mp4Video.load();
+            return mp4Video.play().then(() => {
+                console.log("✓ MP4 video manually started");
+                console.log("Video properties:", {
+                    duration: mp4Video.duration,
+                    videoWidth: mp4Video.videoWidth,
+                    videoHeight: mp4Video.videoHeight,
+                    readyState: mp4Video.readyState,
+                    paused: mp4Video.paused,
+                    muted: mp4Video.muted,
+                    loop: mp4Video.loop
+                });
+            }).catch(e => {
+                console.error("❌ Failed to manually start MP4:", e);
+            });
+        }; 
+        
         // Automatically start webcam after page loads
         window.addEventListener('DOMContentLoaded', () => {
             // Give the page a moment to initialize
             setTimeout(() => {
                 startWebcam();
+                
+                // Start the MP4 video with better error handling
+                console.log("Attempting to start MP4 video...");
+                mp4Video.play().then(() => {
+                    console.log("✓ MP4 video started playing successfully");
+                    console.log("MP4 video dimensions:", mp4Video.videoWidth, "x", mp4Video.videoHeight);
+                    
+                    // Try to update right lens material after a short delay
+                    setTimeout(() => {
+                        updateRightLensWithMp4();
+                    }, 500);
+                }).catch(e => {
+                    console.error("❌ Error starting MP4 video:", e);
+                    
+                    // Try alternative approach - user gesture might be required
+                    document.addEventListener('click', function startVideoOnClick() {
+                        mp4Video.play().then(() => {
+                            console.log("✓ MP4 video started after user interaction");
+                            document.removeEventListener('click', startVideoOnClick);
+                            
+                            // Try to update right lens material after video starts
+                            setTimeout(() => {
+                                updateRightLensWithMp4();
+                            }, 500);
+                        }).catch(err => {
+                            console.error("❌ Still couldn't start MP4 video:", err);
+                        });
+                    }, { once: true });
+                    
+                    console.log("🖱️ Click anywhere to start MP4 video");
+                });
+                
+                // Also try to update right lens material periodically until it succeeds
+                const retryInterval = setInterval(() => {
+                    if (updateRightLensWithMp4()) {
+                        clearInterval(retryInterval);
+                        console.log("✓ Right lens material update successful, stopping retry attempts");
+                    }
+                }, 1000); // Try every second
+                
+                // Stop trying after 30 seconds
+                setTimeout(() => {
+                    clearInterval(retryInterval);
+                    console.log("⏰ Stopped trying to update right lens material after 30 seconds");
+                }, 30000);
             }, 1000);
         });
         
@@ -759,7 +1020,7 @@
                 currentMode = 'texture';
                 toggleModeButton.textContent = "Switch to Reflection Mode";
                 
-                // Apply video material only to left lens, metal to others, eyes keep synthwave
+                // Apply video material only to left lens, MP4 to right lens, metal to others, eyes keep synthwave
                 modelMaterials.forEach(item => {
                     if (item.isEyes) {
                         // Eyes always keep their synthwave glow
@@ -769,6 +1030,13 @@
                         const videoMaterial = createVideoMaterial(false);
                         item.mesh.material = videoMaterial;
                         item.material = videoMaterial;
+                    } else if (item.isRightLens) {
+                        // Right lens keeps the MP4 video
+                        if (!sharedMp4VideoMaterial) {
+                            sharedMp4VideoMaterial = createMp4VideoMaterial();
+                        }
+                        item.mesh.material = sharedMp4VideoMaterial;
+                        item.material = sharedMp4VideoMaterial;
                     } else {
                         if (!sharedMetalMaterial) {
                             sharedMetalMaterial = createMetalMaterial();
@@ -795,11 +1063,17 @@
                     sharedMetalMaterial = createMetalMaterial();
                 }
                 
-                // Apply the same metal material to all parts except Eyes
+                // Apply the same metal material to all parts except Eyes and right lens with MP4
                 modelMaterials.forEach(item => {
                     if (item.isEyes) {
                         // Eyes always keep their synthwave glow
                         item.mesh.material = sharedSynthwaveEyesMaterial;
+                    } else if (item.isRightLens) {
+                        // Right lens keeps the MP4 video even in reflection mode
+                        if (!sharedMp4VideoMaterial) {
+                            sharedMp4VideoMaterial = createMp4VideoMaterial();
+                        }
+                        item.mesh.material = sharedMp4VideoMaterial;
                     } else {
                         item.mesh.material = sharedMetalMaterial;
                     }
