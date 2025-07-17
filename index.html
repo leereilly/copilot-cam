@@ -109,8 +109,14 @@
         let targetRotationY = 0;
         const rotationSmoothness = 0.02; // Lower values = smoother/slower rotation
 
-        // Mouse click handler to identify meshes
-        function onMouseClick(event) {
+        // Mouse press handler to identify meshes and trigger blink
+        function onMouseDown(event) {
+            // Trigger blink animation on mouse press
+            if (!isBlinking) {
+                isBlinking = true;
+                blinkProgress = 0;
+            }
+            
             if (!modelGroupRef) return;
             
             // Calculate mouse position in normalized device coordinates (-1 to +1)
@@ -134,8 +140,8 @@
             }
         }
 
-        // Add click event listener
-        window.addEventListener('click', onMouseClick, false);
+        // Add mousedown event listener
+        window.addEventListener('mousedown', onMouseDown, false);
         
         // Add mouse move event listener for model tracking
         window.addEventListener('mousemove', onMouseMove, false);
@@ -327,6 +333,12 @@
         
         // Animation time for synthwave effect
         let synthwaveTime = 0;
+        
+        // Blinking animation state
+        let isBlinking = false;
+        let blinkProgress = 0;
+        const blinkDuration = 0.08; // Duration of one blink in seconds - very fast blinks
+        let eyeMeshes = []; // Store references to eye meshes for scaling
         
         // Metal materials array to update
         const modelMaterials = [];
@@ -645,6 +657,8 @@
                         
                         if (isEyes) {
                             child.material = sharedSynthwaveEyesMaterial;
+                            // Store reference to eye mesh for blinking animation
+                            eyeMeshes.push(child);
                         } else if (isLeftLens) {
                             child.material = leftLensVideoMaterial;
                         } else {
@@ -673,6 +687,8 @@
                         
                         if (isEyes) {
                             child.material = sharedSynthwaveEyesMaterial;
+                            // Store reference to eye mesh for blinking animation
+                            eyeMeshes.push(child);
                         } else if (isRightLens) {
                             // Start with metal material, will update to MP4 once video is ready
                             child.material = defaultMaterial;
@@ -803,8 +819,51 @@
                 modelGroupRef.rotation.x += (targetRotationX - modelGroupRef.rotation.x) * rotationSmoothness;
             }
             
-            // Animate synthwave eyes glow
+            // Animate synthwave eyes glow and blinking
             if (sharedSynthwaveEyesMaterial) {
+                // Handle blinking animation
+                if (isBlinking) {
+                    blinkProgress += 0.016; // Assuming 60fps, this is roughly 1/60
+                    
+                    if (blinkProgress >= blinkDuration) {
+                        // Blink completed - reset eye scales
+                        isBlinking = false;
+                        blinkProgress = 0;
+                        
+                        // Reset all eye meshes to normal scale
+                        eyeMeshes.forEach(eyeMesh => {
+                            eyeMesh.scale.set(1, 1, 1);
+                        });
+                    }
+                    
+                    // Calculate blink effect (eyes close and open)
+                    // Use a sine wave for smooth closing and opening
+                    const blinkNormalized = blinkProgress / blinkDuration;
+                    const blinkIntensity = Math.sin(blinkNormalized * Math.PI); // 0 -> 1 -> 0
+                    
+                    // Scale down the eye meshes during blink (shrink effect)
+                    const scaleMultiplier = 1 - blinkIntensity * 0.7; // Scale down to 30% at peak blink
+                    eyeMeshes.forEach(eyeMesh => {
+                        eyeMesh.scale.set(scaleMultiplier, scaleMultiplier * 0.3, scaleMultiplier); // More dramatic Y scaling for eye closing
+                    });
+                    
+                    // Reduce opacity and emissive intensity during blink
+                    const baseOpacity = 0.9;
+                    const baseEmissiveIntensity = 1.5 + Math.sin(synthwaveTime * 2) * 0.5;
+                    
+                    sharedSynthwaveEyesMaterial.opacity = baseOpacity * (1 - blinkIntensity * 0.5); // Less opacity reduction since we're scaling
+                    sharedSynthwaveEyesMaterial.emissiveIntensity = baseEmissiveIntensity * (1 - blinkIntensity * 0.3);
+                } else {
+                    // Normal glow animation when not blinking
+                    sharedSynthwaveEyesMaterial.opacity = 0.9;
+                    sharedSynthwaveEyesMaterial.emissiveIntensity = 1.5 + Math.sin(synthwaveTime * 2) * 0.5;
+                    
+                    // Ensure eyes are at normal scale when not blinking
+                    eyeMeshes.forEach(eyeMesh => {
+                        eyeMesh.scale.set(1, 1, 1);
+                    });
+                }
+                
                 // Create pulsing synthwave colors
                 const hue1 = (Math.sin(synthwaveTime * 1.2) + 1) * 0.5; // 0-1 range
                 const hue2 = (Math.sin(synthwaveTime * 0.8 + Math.PI) + 1) * 0.5; // 0-1 range offset
@@ -824,7 +883,6 @@
                 
                 sharedSynthwaveEyesMaterial.color = mixedColor;
                 sharedSynthwaveEyesMaterial.emissive = mixedEmissive;
-                sharedSynthwaveEyesMaterial.emissiveIntensity = 1.5 + Math.sin(synthwaveTime * 2) * 0.5; // Pulsing intensity
             }
             
             // Always update video texture if webcam has data
@@ -870,9 +928,9 @@
                     }, 500);
                 }).catch(e => {
                     // Try alternative approach - user gesture might be required
-                    document.addEventListener('click', function startVideoOnClick() {
+                    document.addEventListener('mousedown', function startVideoOnMouseDown() {
                         mp4Video.play().then(() => {
-                            document.removeEventListener('click', startVideoOnClick);
+                            document.removeEventListener('mousedown', startVideoOnMouseDown);
                             
                             // Try to update right lens material after video starts
                             setTimeout(() => {
