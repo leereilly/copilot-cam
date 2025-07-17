@@ -2,6 +2,10 @@
 
 A 3D model viewer that brings GitHub Copilot to life with interactive webcam reflections and video textures.
 
+This is vibe coding experiment with GitHub Copilot, Claude Sonnet 4.0, and lots of caffeine and Red Bull. 
+
+Built for GitHub's [For the Love of Code](https://gh.io/ftloc) hackathon.
+
 ## Features
 
 - **Interactive 3D Model**: View and rotate a detailed 3D model of GitHub Copilot
