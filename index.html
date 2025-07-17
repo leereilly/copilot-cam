@@ -123,6 +123,7 @@
                         name: materialInfo.meshName,
                         index: materialInfo.meshIndex,
                         isLeftLens: materialInfo.isLeftLens,
+                        isEyes: materialInfo.isEyes,
                         vertices: clickedMesh.geometry?.attributes?.position?.count
                     });
                 }
@@ -197,12 +198,30 @@
             return material;
         };
         
+        // Create synthwave glowing material for Eyes meshes
+        const createSynthwaveEyesMaterial = () => {
+            return new THREE.MeshStandardMaterial({
+                color: 0xff0080, // Bright magenta/pink
+                emissive: new THREE.Color(0x00ffff), // Cyan emissive glow
+                emissiveIntensity: 1.0,
+                metalness: 0.0,
+                roughness: 0.1,
+                transparent: true,
+                opacity: 0.9,
+                side: THREE.DoubleSide
+            });
+        };
+        
+        // Animation time for synthwave effect
+        let synthwaveTime = 0;
+        
         // Metal materials array to update
         const modelMaterials = [];
         
         // Create shared materials once to ensure consistent mapping
         let sharedVideoMaterial = null;
         let sharedMetalMaterial = null;
+        let sharedSynthwaveEyesMaterial = null;
         
         // Apply material to all meshes in a model
         const applyMaterialToModel = (model, materialType, isMirrored = false) => {
@@ -416,10 +435,17 @@
                                         if (!sharedVideoMaterial) {
                                             sharedVideoMaterial = createVideoMaterial();
                                         }
-                                                         // Apply the same material to all parts for seamless texture
+                                                        // Apply the same material to all parts for seamless texture
                         modelMaterials.forEach(item => {
-                            // Only apply video material to left lens, others get metal material
-                            if (item.isLeftLens) {
+                            // Apply appropriate materials: video to left lens, synthwave to eyes, metal to others
+                            if (item.isEyes) {
+                                // Eyes always keep their synthwave glow
+                                if (!sharedSynthwaveEyesMaterial) {
+                                    sharedSynthwaveEyesMaterial = createSynthwaveEyesMaterial();
+                                }
+                                item.mesh.material = sharedSynthwaveEyesMaterial;
+                                item.material = sharedSynthwaveEyesMaterial;
+                            } else if (item.isLeftLens) {
                                 const videoMaterial = createVideoMaterial(false);
                                 item.mesh.material = videoMaterial;
                                 item.material = videoMaterial;
@@ -503,6 +529,11 @@
                 const defaultMaterial = createMetalMaterial();
                 const leftLensVideoMaterial = createVideoMaterial(false);
                 
+                // Create the synthwave eyes material
+                if (!sharedSynthwaveEyesMaterial) {
+                    sharedSynthwaveEyesMaterial = createSynthwaveEyesMaterial();
+                }
+                
                 // Apply materials to the original model
                 originalModel.traverse((child) => {
                     if (child.isMesh) {
@@ -519,10 +550,14 @@
                             console.log("  - World bounding box center:", center);
                         }
                         
-                        // Check if this is the Glass mesh (left lens)
+                        // Check mesh type and apply appropriate material
                         const isLeftLens = child.name === 'Glass';
+                        const isEyes = child.name === 'Eyes';
                         
-                        if (isLeftLens) {
+                        if (isEyes) {
+                            child.material = sharedSynthwaveEyesMaterial;
+                            console.log("✨ Applied synthwave glow material to Eyes:", child.name);
+                        } else if (isLeftLens) {
                             child.material = leftLensVideoMaterial;
                             console.log("✓ Applied video material to Glass lens:", child.name);
                         } else {
@@ -534,6 +569,7 @@
                             material: child.material,
                             isMirrored: false,
                             isLeftLens: isLeftLens,
+                            isEyes: isEyes,
                             meshIndex: modelMaterials.length,
                             meshName: child.name
                         });
@@ -542,15 +578,24 @@
                     }
                 });
                 
-                // Apply materials to the mirrored model (all default material)
+                // Apply materials to the mirrored model (all default material except Eyes)
                 mirroredModel.traverse((child) => {
                     if (child.isMesh) {
-                        child.material = defaultMaterial;
+                        const isEyes = child.name === 'Eyes';
+                        
+                        if (isEyes) {
+                            child.material = sharedSynthwaveEyesMaterial;
+                            console.log("✨ Applied synthwave glow material to mirrored Eyes:", child.name);
+                        } else {
+                            child.material = defaultMaterial;
+                        }
+                        
                         modelMaterials.push({
                             mesh: child,
-                            material: defaultMaterial,
+                            material: child.material,
                             isMirrored: true,
-                            isLeftLens: false
+                            isLeftLens: false,
+                            isEyes: isEyes
                         });
                         child.castShadow = true;
                         child.receiveShadow = true;
@@ -656,6 +701,33 @@
         function animate() {
             requestAnimationFrame(animate);
             
+            // Update synthwave time for pulsing glow effect
+            synthwaveTime += 0.05;
+            
+            // Animate synthwave eyes glow
+            if (sharedSynthwaveEyesMaterial) {
+                // Create pulsing synthwave colors
+                const hue1 = (Math.sin(synthwaveTime * 1.2) + 1) * 0.5; // 0-1 range
+                const hue2 = (Math.sin(synthwaveTime * 0.8 + Math.PI) + 1) * 0.5; // 0-1 range offset
+                
+                // Mix between magenta/pink and cyan
+                const mixedColor = new THREE.Color().setHSL(
+                    0.8 + hue1 * 0.3, // Hue: purple to pink range
+                    1.0, // Full saturation
+                    0.5 + hue2 * 0.3 // Lightness variation
+                );
+                
+                const mixedEmissive = new THREE.Color().setHSL(
+                    0.5 + hue2 * 0.3, // Hue: cyan to blue range
+                    1.0, // Full saturation
+                    0.6 + hue1 * 0.4 // Lightness variation
+                );
+                
+                sharedSynthwaveEyesMaterial.color = mixedColor;
+                sharedSynthwaveEyesMaterial.emissive = mixedEmissive;
+                sharedSynthwaveEyesMaterial.emissiveIntensity = 1.5 + Math.sin(synthwaveTime * 2) * 0.5; // Pulsing intensity
+            }
+            
             // Always update video texture if webcam has data
             if (webcamVideo.readyState === webcamVideo.HAVE_ENOUGH_DATA) {
                 webcamTexture.needsUpdate = true;
@@ -687,9 +759,13 @@
                 currentMode = 'texture';
                 toggleModeButton.textContent = "Switch to Reflection Mode";
                 
-                // Apply video material only to left lens, metal to others
+                // Apply video material only to left lens, metal to others, eyes keep synthwave
                 modelMaterials.forEach(item => {
-                    if (item.isLeftLens) {
+                    if (item.isEyes) {
+                        // Eyes always keep their synthwave glow
+                        item.mesh.material = sharedSynthwaveEyesMaterial;
+                        item.material = sharedSynthwaveEyesMaterial;
+                    } else if (item.isLeftLens) {
                         const videoMaterial = createVideoMaterial(false);
                         item.mesh.material = videoMaterial;
                         item.material = videoMaterial;
@@ -719,9 +795,14 @@
                     sharedMetalMaterial = createMetalMaterial();
                 }
                 
-                // Apply the same metal material to all parts
+                // Apply the same metal material to all parts except Eyes
                 modelMaterials.forEach(item => {
-                    item.mesh.material = sharedMetalMaterial;
+                    if (item.isEyes) {
+                        // Eyes always keep their synthwave glow
+                        item.mesh.material = sharedSynthwaveEyesMaterial;
+                    } else {
+                        item.mesh.material = sharedMetalMaterial;
+                    }
                 });
                 
                 loadingInfo.innerHTML = "Reflection mode enabled. Your webcam provides environmental reflections.";
