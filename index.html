@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Copilot GLB Viewer</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        canvas { display: block; }
+        .loading-info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-family: Arial, sans-serif;
+        }
+    </style>
+</head>
+<body>
+    <div class="loading-info" id="loadingInfo">Loading model...</div>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+        // Create scene
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x333333);
+
+        // Create camera
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.z = 5;
+
+        // Create renderer
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        // THREE.sRGBEncoding is deprecated, using the new property
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        document.body.appendChild(renderer.domElement);
+
+        // Add lights
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+        directionalLight.position.set(5, 10, 7.5);
+        scene.add(directionalLight);
+
+        // Add orbit controls
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+
+        // Load GLB model
+        const loadingInfo = document.getElementById('loadingInfo');
+        const loader = new GLTFLoader();
+        
+        loader.load(
+            // Resource URL
+            'copilot.glb',
+            // Called when the resource is loaded
+            function (gltf) {
+                // Create a group to hold both original and mirrored models
+                const modelGroup = new THREE.Group();
+                scene.add(modelGroup);
+                
+                // Add the original model to the group
+                const originalModel = gltf.scene.clone();
+                modelGroup.add(originalModel);
+                
+                // Create a mirrored copy of the model
+                const mirroredModel = gltf.scene.clone();
+                
+                // Apply a scaling transformation to mirror across the YZ plane (flip X axis)
+                mirroredModel.scale.set(-1, 1, 1);
+                
+                // Add the mirrored model to the group
+                modelGroup.add(mirroredModel);
+                
+                // Center the entire group
+                const box = new THREE.Box3().setFromObject(modelGroup);
+                const center = box.getCenter(new THREE.Vector3());
+                modelGroup.position.x = -center.x;
+                modelGroup.position.y = -center.y;
+                modelGroup.position.z = -center.z;
+                
+                // Adjust camera
+                const size = box.getSize(new THREE.Vector3());
+                const maxDim = Math.max(size.x, size.y, size.z);
+                const fov = camera.fov * (Math.PI / 180);
+                let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2));
+                cameraZ *= 1.5; // Zoom out a bit
+                camera.position.z = cameraZ;
+                
+                // Update the camera's near and far planes
+                camera.near = cameraZ / 100;
+                camera.far = cameraZ * 100;
+                camera.updateProjectionMatrix();
+                
+                // Update loading info
+                loadingInfo.innerHTML = 'Model loaded successfully! Use mouse to rotate, scroll to zoom.';
+                setTimeout(() => {
+                    loadingInfo.style.opacity = '0';
+                    setTimeout(() => {
+                        loadingInfo.style.display = 'none';
+                    }, 1000);
+                }, 3000);
+            },
+            // Called while loading is progressing
+            function (xhr) {
+                const percentComplete = xhr.loaded / xhr.total * 100;
+                loadingInfo.innerHTML = 'Loading: ' + Math.round(percentComplete) + '%';
+            },
+            // Called when loading has errors
+            function (error) {
+                loadingInfo.innerHTML = 'Error loading model: ' + error.message;
+                console.error('An error happened', error);
+            }
+        );
+
+        // Handle window resize
+        window.addEventListener('resize', onWindowResize);
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update(); // required if controls.enableDamping = true
+            renderer.render(scene, camera);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
