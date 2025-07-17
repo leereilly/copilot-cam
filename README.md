@@ -3,7 +3,7 @@
 A vibe coding experiment with GitHub Copilot, Claude Sonnet 4.0, and lots of caffeine and Red Bull. 
 Built for GitHub's [For the Love of Code](https://gh.io/ftloc) hackathon.
 
-Currently a 3D Copilot model that you displays your webcam footage in their goggles.
+Currently a 3D Copilot model you displays your webcam footage in their goggles.
 
 🚧 Work in progress.
 
