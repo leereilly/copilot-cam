@@ -20,23 +20,14 @@
             transition: opacity 0.5s;
         }
         #webcamVideo {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            width: 160px;
-            height: 120px;
-            border: 2px solid white;
-            border-radius: 5px;
             display: none;
-            /* Prevent webcam from being mirrored in the preview */
-            transform: scaleX(-1);
         }
     </style>
 </head>
 <body>
     <div class="loading-info" id="loadingInfo">Loading model...</div>
-    <video id="webcamVideo" autoplay playsinline muted></video>
-    <video id="mp4Video" autoplay playsinline muted loop preload="auto" style="position: absolute; top: 140px; right: 10px; width: 160px; height: 120px; border: 2px solid red; z-index: 200;">
+    <video id="webcamVideo" autoplay playsinline muted style="display: none;"></video>
+    <video id="mp4Video" autoplay playsinline muted loop preload="auto" style="display: none;">
         <source src="vid.mp4" type="video/mp4">
         Your browser does not support the video tag.
     </video>
@@ -118,19 +109,11 @@
 
             if (intersects.length > 0) {
                 const clickedMesh = intersects[0].object;
-                console.log("🖱️ Clicked mesh:", clickedMesh.name, "Position:", clickedMesh.position);
                 
                 // Find the mesh in our materials array
                 const materialInfo = modelMaterials.find(item => item.mesh === clickedMesh);
                 if (materialInfo) {
-                    console.log("📋 Mesh info:", {
-                        name: materialInfo.meshName,
-                        index: materialInfo.meshIndex,
-                        isLeftLens: materialInfo.isLeftLens,
-                        isRightLens: materialInfo.isRightLens,
-                        isEyes: materialInfo.isEyes,
-                        vertices: clickedMesh.geometry?.attributes?.position?.count
-                    });
+                    // Mesh clicked - could add UI feedback here
                 }
             }
         }
@@ -153,19 +136,9 @@
         const mp4Video = document.getElementById('mp4Video');
         let mp4Texture = null; // Don't create texture until video is ready
         
-        // Add event listeners for MP4 video debugging
-        mp4Video.addEventListener('loadstart', () => {
-            console.log('MP4: Load started');
-            console.log('MP4 properties:', {
-                src: mp4Video.src,
-                currentSrc: mp4Video.currentSrc,
-                readyState: mp4Video.readyState,
-                networkState: mp4Video.networkState
-            });
-        });
+        // Add event listeners for MP4 video
+        mp4Video.addEventListener('loadstart', () => {});
         mp4Video.addEventListener('loadeddata', () => {
-            console.log('MP4: Data loaded');
-            console.log('MP4 dimensions:', mp4Video.videoWidth, 'x', mp4Video.videoHeight);
             // Create texture now that data is loaded
             if (!mp4Texture) {
                 mp4Texture = new THREE.VideoTexture(mp4Video);
@@ -175,14 +148,11 @@
                 mp4Texture.wrapS = THREE.ClampToEdgeWrapping;
                 mp4Texture.wrapT = THREE.ClampToEdgeWrapping;
                 mp4Texture.flipY = false;
-                console.log('🎬 MP4 texture created');
             }
             // Try to update right lens material now that data is loaded
             setTimeout(() => updateRightLensWithMp4(), 100);
         });
         mp4Video.addEventListener('canplay', () => {
-            console.log('MP4: Can play');
-            console.log('MP4 readyState:', mp4Video.readyState, 'dimensions:', mp4Video.videoWidth, 'x', mp4Video.videoHeight);
             // Create texture if not already created
             if (!mp4Texture) {
                 mp4Texture = new THREE.VideoTexture(mp4Video);
@@ -192,20 +162,12 @@
                 mp4Texture.wrapS = THREE.ClampToEdgeWrapping;
                 mp4Texture.wrapT = THREE.ClampToEdgeWrapping;
                 mp4Texture.flipY = false;
-                console.log('🎬 MP4 texture created on canplay');
             }
             // Update right lens material when video can play
             updateRightLensWithMp4();
         });
-        mp4Video.addEventListener('canplaythrough', () => console.log('MP4: Can play through'));
+        mp4Video.addEventListener('canplaythrough', () => {});
         mp4Video.addEventListener('playing', () => {
-            console.log('MP4: Playing');
-            console.log('MP4 playing state:', {
-                currentTime: mp4Video.currentTime,
-                duration: mp4Video.duration,
-                paused: mp4Video.paused,
-                ended: mp4Video.ended
-            });
             // Create texture if not already created
             if (!mp4Texture) {
                 mp4Texture = new THREE.VideoTexture(mp4Video);
@@ -215,40 +177,17 @@
                 mp4Texture.wrapS = THREE.ClampToEdgeWrapping;
                 mp4Texture.wrapT = THREE.ClampToEdgeWrapping;
                 mp4Texture.flipY = false;
-                console.log('🎬 MP4 texture created on playing');
             }
             // Update right lens material when video starts playing
             updateRightLensWithMp4();
         });
-        mp4Video.addEventListener('error', (e) => {
-            console.error('MP4 Error:', e, mp4Video.error);
-            if (mp4Video.error) {
-                console.error('MP4 Error details:', {
-                    code: mp4Video.error.code,
-                    message: mp4Video.error.message
-                });
-            }
-        });
-        mp4Video.addEventListener('stalled', () => console.log('MP4: Stalled'));
-        mp4Video.addEventListener('suspend', () => console.log('MP4: Suspend'));
-        mp4Video.addEventListener('abort', () => console.log('MP4: Abort'));
+        mp4Video.addEventListener('error', (e) => {});
+        mp4Video.addEventListener('stalled', () => {});
+        mp4Video.addEventListener('suspend', () => {});
+        mp4Video.addEventListener('abort', () => {});
         
         // Try to start the MP4 video immediately
         mp4Video.load(); // Explicitly load the video
-        
-        // Debug the MP4 video element properties
-        console.log('MP4 Video Element Debug:', {
-            autoplay: mp4Video.autoplay,
-            loop: mp4Video.loop,
-            muted: mp4Video.muted,
-            preload: mp4Video.preload,
-            src: mp4Video.src,
-            currentSrc: mp4Video.currentSrc,
-            readyState: mp4Video.readyState,
-            networkState: mp4Video.networkState,
-            paused: mp4Video.paused,
-            ended: mp4Video.ended
-        });
         
         // Use webcam as environment map
         const pmremGenerator = new THREE.PMREMGenerator(renderer);
@@ -322,7 +261,6 @@
         const createMp4VideoMaterial = () => {
             // Only create the material if the video is ready and texture exists
             if (mp4Video.readyState < 2 || !mp4Texture) { // HAVE_CURRENT_DATA
-                console.log("MP4 video not ready yet or texture not created, using metal material as fallback");
                 return createMetalMaterial();
             }
             
@@ -352,7 +290,6 @@
                 emissiveIntensity: 0.3
             });
             
-            console.log("✓ MP4 video material created successfully");
             return material;
         };
         
@@ -371,8 +308,6 @@
         // Function to update right lens with MP4 video material once video is ready
         function updateRightLensWithMp4() {
             if (mp4Video.readyState >= 2 && mp4Texture) { // HAVE_CURRENT_DATA and texture exists
-                console.log("🎥 MP4 video is ready, updating right lens material");
-                
                 // Create the MP4 video material now that video is ready
                 const mp4VideoMaterial = createMp4VideoMaterial();
                 sharedMp4VideoMaterial = mp4VideoMaterial;
@@ -382,7 +317,6 @@
                     if (item.isRightLens) {
                         item.mesh.material = mp4VideoMaterial;
                         item.material = mp4VideoMaterial;
-                        console.log("✓ Updated right lens with MP4 video material:", item.meshName);
                     }
                 });
                 
@@ -429,7 +363,6 @@
 
         // Function to load static environment map as fallback
         function useStaticEnvironmentMap() {
-            console.log("Using static environment map as fallback");
             // Simply create a dark gray background instead of using environment mapping
             // to avoid shader compilation issues
             scene.background = new THREE.Color(0x333333);
@@ -443,12 +376,6 @@
                 // Only update if video is actually playing
                 if (webcamVideo.readyState === webcamVideo.HAVE_ENOUGH_DATA) {
                     webcamTexture.needsUpdate = true;
-                    
-                    // Debug webcam status every few seconds
-                    if (Math.random() < 0.01) { // ~1% chance each frame = occasional logging
-                        console.log("Webcam active, dimensions:", webcamVideo.videoWidth, "x", webcamVideo.videoHeight);
-                        console.log("Video texture update status:", webcamTexture.needsUpdate);
-                    }
                     
                     // Skip environment mapping when in texture mode to avoid shader errors
                     if (currentMode === 'texture') {
@@ -470,20 +397,16 @@
                             });
                         }
                     } catch (renderError) {
-                        console.error("Error with webcam texture:", renderError);
                         // If we fail with webcam, fall back to static
                         useStaticEnvironmentMap();
                         // Stop trying to update from webcam
                         return;
                     }
-                } else {
-                    console.log("Waiting for video data, current state:", webcamVideo.readyState);
                 }
                 
                 // Continue updating
                 requestAnimationFrame(updateEnvironmentMap);
             } catch (error) {
-                console.error("Fatal error updating environment map:", error);
                 // Fall back to static environment map
                 useStaticEnvironmentMap();
             }
@@ -491,11 +414,8 @@
         
         // Start webcam automatically
         function startWebcam() {
-            console.log("Starting webcam access...");
-            
             // Check for secure context
             if (window.isSecureContext === false) {
-                console.warn("Not in a secure context - webcam might not work");
                 loadingInfo.innerHTML = "Warning: Site not in secure context. Webcam may not work. Try using HTTPS or localhost.";
                 loadingInfo.style.opacity = '1';
                 loadingInfo.style.display = 'block';
@@ -519,29 +439,21 @@
                 navigator.mediaDevices.enumerateDevices()
                     .then(devices => {
                         const videoDevices = devices.filter(device => device.kind === 'videoinput');
-                        console.log(`Found ${videoDevices.length} video devices:`, videoDevices);
-                        console.log("Current location: " + window.location.href);
-                        console.log("Is secure context: " + window.isSecureContext);
                         
                         // Additional debugging for permissions
                         if (navigator.permissions) {
                             navigator.permissions.query({ name: 'camera' })
                                 .then(permissionStatus => {
-                                    console.log("Camera permission status:", permissionStatus.state);
-                                    
                                     permissionStatus.onchange = () => {
-                                        console.log("Camera permission changed to:", permissionStatus.state);
+                                        // Permission status changed
                                     };
                                 })
                                 .catch(err => {
-                                    console.log("Error checking camera permission:", err);
+                                    // Error checking camera permission
                                 });
-                        } else {
-                            console.log("Permissions API not available");
                         }
                         
                         if (videoDevices.length === 0) {
-                            console.error("No video devices found");
                             loadingInfo.innerHTML = "No camera found on this device. Using static reflections instead.<br>Make sure you allow camera access and are using a secure context (https or localhost).";
                             loadingInfo.style.display = 'block';
                             loadingInfo.style.opacity = '1';
@@ -556,7 +468,6 @@
                         tryConstraints(constraints, 0);
                     })
                     .catch(err => {
-                        console.error("Error enumerating devices:", err);
                         // Still try to access webcam even if enumeration fails
                         tryConstraints(constraints, 0);
                     });
@@ -564,7 +475,6 @@
                 function tryConstraints(constraintList, index) {
                     if (index >= constraintList.length) {
                         // All constraints failed, show error
-                        console.error("No camera could be accessed after trying all options");
                         loadingInfo.innerHTML = "Could not access any camera. Using static reflections instead.";
                         useStaticEnvironmentMap();
                         setTimeout(() => {
@@ -573,20 +483,13 @@
                         return;
                     }
                     
-                    console.log(`Trying constraint set ${index}:`, constraintList[index]);
-                    
                     navigator.mediaDevices.getUserMedia(constraintList[index])
                         .then(function(stream) {
-                            console.log("Webcam access granted with constraint set", index);
-                            
                             // Ensure video tracks are enabled and active
                             const videoTracks = stream.getVideoTracks();
                             if (videoTracks.length === 0) {
-                                console.error("No video tracks in stream");
                                 throw new Error("No video tracks found");
                             }
-                            
-                            console.log("Video tracks:", videoTracks);
                             
                             // Assign the stream to the video element
                             webcamVideo.srcObject = stream;
@@ -595,15 +498,11 @@
                             webcamVideo.onloadedmetadata = function() {
                                 webcamVideo.play()
                                     .then(() => {
-                                        console.log("Video playback started");
-                                        // Show webcam feed in corner
-                                        webcamVideo.style.display = 'block';
-                                        
                                         // Make sure we're using a single shared material for all parts
                                         if (!sharedVideoMaterial) {
                                             sharedVideoMaterial = createVideoMaterial();
                                         }
-                                                        // Apply the same material to all parts for seamless texture
+                                        // Apply the same material to all parts for seamless texture
                         modelMaterials.forEach(item => {
                             // Apply appropriate materials: video to left lens, MP4 to right lens, synthwave to eyes, metal to others
                             if (item.isEyes) {
@@ -644,25 +543,21 @@
                                         updateEnvironmentMap();
                                     })
                                     .catch(e => {
-                                        console.error("Error playing video:", e);
                                         loadingInfo.innerHTML = "Error starting video playback. Using static reflections.";
                                         useStaticEnvironmentMap();
                                     });
                             };
                             
                             webcamVideo.onerror = function() {
-                                console.error("Video element error:", webcamVideo.error);
                                 throw new Error("Video element error: " + webcamVideo.error);
                             };
                         })
                         .catch(function(error) {
-                            console.error(`Error with constraint set ${index}:`, error);
                             // Try the next constraint
                             tryConstraints(constraintList, index + 1);
                         });
                 }
             } else {
-                console.warn("MediaDevices interface not supported");
                 loadingInfo.innerHTML = "Your browser doesn't support webcam access. Using static reflections instead.";
                 useStaticEnvironmentMap();
                 setTimeout(() => {
@@ -712,29 +607,14 @@
                 // Apply materials to the original model
                 originalModel.traverse((child) => {
                     if (child.isMesh) {
-                        // Debug: log all mesh names and positions to help identify the left lens
-                        console.log("Mesh found:", child.name, "Position:", child.position);
-                        console.log("  - Geometry vertices:", child.geometry?.attributes?.position?.count || 0);
-                        
-                        // Compute bounding box for more detailed position info
-                        if (child.geometry) {
-                            child.geometry.computeBoundingBox();
-                            const box = child.geometry.boundingBox.clone();
-                            box.applyMatrix4(child.matrixWorld);
-                            const center = box.getCenter(new THREE.Vector3());
-                            console.log("  - World bounding box center:", center);
-                        }
-                        
                         // Check mesh type and apply appropriate material
                         const isLeftLens = child.name === 'Glass';
                         const isEyes = child.name === 'Eyes';
                         
                         if (isEyes) {
                             child.material = sharedSynthwaveEyesMaterial;
-                            console.log("✨ Applied synthwave glow material to Eyes:", child.name);
                         } else if (isLeftLens) {
                             child.material = leftLensVideoMaterial;
-                            console.log("✓ Applied video material to Glass lens:", child.name);
                         } else {
                             child.material = defaultMaterial;
                         }
@@ -761,11 +641,9 @@
                         
                         if (isEyes) {
                             child.material = sharedSynthwaveEyesMaterial;
-                            console.log("✨ Applied synthwave glow material to mirrored Eyes:", child.name);
                         } else if (isRightLens) {
                             // Start with metal material, will update to MP4 once video is ready
                             child.material = defaultMaterial;
-                            console.log("🎬 Applied temporary metal material to right lens (will update to MP4):", child.name);
                         } else {
                             child.material = defaultMaterial;
                         }
@@ -826,7 +704,6 @@
             // Called when loading has errors
             function (error) {
                 loadingInfo.innerHTML = 'Error loading model: ' + error.message;
-                console.error('An error happened', error);
             }
         );
 
@@ -919,14 +796,6 @@
             // Always update MP4 video texture if it has data and texture exists
             if (mp4Texture && mp4Video.readyState >= 2 && mp4Video.videoWidth > 0 && mp4Video.videoHeight > 0) {
                 mp4Texture.needsUpdate = true;
-                
-                // Debug MP4 status occasionally
-                if (Math.random() < 0.005) { // ~0.5% chance each frame = occasional logging
-                    console.log("MP4 active, dimensions:", mp4Video.videoWidth, "x", mp4Video.videoHeight);
-                    console.log("MP4 current time:", mp4Video.currentTime, "duration:", mp4Video.duration);
-                }
-            } else if (Math.random() < 0.01) {
-                console.log("MP4 waiting for data, current state:", mp4Video.readyState, "dimensions:", mp4Video.videoWidth, "x", mp4Video.videoHeight, "texture exists:", !!mp4Texture);
             }
             
             controls.update(); // required if controls.enableDamping = true
@@ -940,21 +809,11 @@
         
         // Debug function to manually start MP4 video (can be called from console)
         window.startMp4Video = function() {
-            console.log("🎬 Manually starting MP4 video...");
             mp4Video.load();
             return mp4Video.play().then(() => {
-                console.log("✓ MP4 video manually started");
-                console.log("Video properties:", {
-                    duration: mp4Video.duration,
-                    videoWidth: mp4Video.videoWidth,
-                    videoHeight: mp4Video.videoHeight,
-                    readyState: mp4Video.readyState,
-                    paused: mp4Video.paused,
-                    muted: mp4Video.muted,
-                    loop: mp4Video.loop
-                });
+                // MP4 video manually started
             }).catch(e => {
-                console.error("❌ Failed to manually start MP4:", e);
+                // Failed to manually start MP4
             });
         }; 
         
@@ -965,22 +824,15 @@
                 startWebcam();
                 
                 // Start the MP4 video with better error handling
-                console.log("Attempting to start MP4 video...");
                 mp4Video.play().then(() => {
-                    console.log("✓ MP4 video started playing successfully");
-                    console.log("MP4 video dimensions:", mp4Video.videoWidth, "x", mp4Video.videoHeight);
-                    
                     // Try to update right lens material after a short delay
                     setTimeout(() => {
                         updateRightLensWithMp4();
                     }, 500);
                 }).catch(e => {
-                    console.error("❌ Error starting MP4 video:", e);
-                    
                     // Try alternative approach - user gesture might be required
                     document.addEventListener('click', function startVideoOnClick() {
                         mp4Video.play().then(() => {
-                            console.log("✓ MP4 video started after user interaction");
                             document.removeEventListener('click', startVideoOnClick);
                             
                             // Try to update right lens material after video starts
@@ -988,25 +840,21 @@
                                 updateRightLensWithMp4();
                             }, 500);
                         }).catch(err => {
-                            console.error("❌ Still couldn't start MP4 video:", err);
+                            // Still couldn't start MP4 video
                         });
                     }, { once: true });
-                    
-                    console.log("🖱️ Click anywhere to start MP4 video");
                 });
                 
                 // Also try to update right lens material periodically until it succeeds
                 const retryInterval = setInterval(() => {
                     if (updateRightLensWithMp4()) {
                         clearInterval(retryInterval);
-                        console.log("✓ Right lens material update successful, stopping retry attempts");
                     }
                 }, 1000); // Try every second
                 
                 // Stop trying after 30 seconds
                 setTimeout(() => {
                     clearInterval(retryInterval);
-                    console.log("⏰ Stopped trying to update right lens material after 30 seconds");
                 }, 30000);
             }, 1000);
         });
