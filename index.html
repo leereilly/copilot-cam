@@ -2,8 +2,18 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Copilot GLB Viewer</title>
+    <meta name="viewport" content="width=device-width, initial-sc        // Mouse move handler for model rotation
+        function onMouseMove(event) {
+            // Calculate normalized mouse position (-1 to +1)
+            mousePosition.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mousePosition.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            
+            // Calculate target rotation based on mouse position
+            // Limit rotation to reasonable angles (±15 degrees)
+            const maxRotation = Math.PI / 12; // 15 degrees
+            targetRotationY = mousePosition.x * maxRotation;
+            targetRotationX = -mousePosition.y * maxRotation * 0.5; // Fixed: negative sign to correct inversion
+        }  <title>Copilot GLB Viewer</title>
     <style>
         body { margin: 0; overflow: hidden; }
         canvas { display: block; }
@@ -92,6 +102,12 @@
         const raycaster = new THREE.Raycaster();
         const mouse = new THREE.Vector2();
         let modelGroupRef = null;
+        
+        // Mouse tracking for model rotation
+        const mousePosition = new THREE.Vector2();
+        let targetRotationX = 0;
+        let targetRotationY = 0;
+        const rotationSmoothness = 0.02; // Lower values = smoother/slower rotation
 
         // Mouse click handler to identify meshes
         function onMouseClick(event) {
@@ -120,6 +136,22 @@
 
         // Add click event listener
         window.addEventListener('click', onMouseClick, false);
+        
+        // Add mouse move event listener for model tracking
+        window.addEventListener('mousemove', onMouseMove, false);
+        
+        // Mouse move handler for model rotation
+        function onMouseMove(event) {
+            // Calculate normalized mouse position (-1 to +1)
+            mousePosition.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mousePosition.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            
+            // Calculate target rotation based on mouse position
+            // Limit rotation to reasonable angles (±15 degrees)
+            const maxRotation = Math.PI / 12; // 15 degrees
+            targetRotationY = mousePosition.x * maxRotation;
+            targetRotationX = -mousePosition.y * maxRotation * 0.5; // Inverted Y for correct up/down direction
+        }
 
         // Initialize webcam
         const webcamVideo = document.getElementById('webcamVideo');
@@ -763,6 +795,13 @@
             
             // Update synthwave time for pulsing glow effect
             synthwaveTime += 0.05;
+            
+            // Smoothly rotate model to follow mouse cursor
+            if (modelGroupRef) {
+                // Lerp towards target rotation for smooth movement
+                modelGroupRef.rotation.y += (targetRotationY - modelGroupRef.rotation.y) * rotationSmoothness;
+                modelGroupRef.rotation.x += (targetRotationX - modelGroupRef.rotation.x) * rotationSmoothness;
+            }
             
             // Animate synthwave eyes glow
             if (sharedSynthwaveEyesMaterial) {
