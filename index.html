@@ -48,6 +48,10 @@
         renderer.setPixelRatio(window.devicePixelRatio);
         // THREE.sRGBEncoding is deprecated, using the new property
         renderer.outputColorSpace = THREE.SRGBColorSpace;
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.0;
         document.body.appendChild(renderer.domElement);
 
         // Add lights
@@ -56,13 +60,59 @@
 
         const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
         directionalLight.position.set(5, 10, 7.5);
+        directionalLight.castShadow = true;
         scene.add(directionalLight);
+        
+        // Add point lights for better metallic reflections
+        const pointLight1 = new THREE.PointLight(0xffffff, 1, 50);
+        pointLight1.position.set(0, 10, 10);
+        scene.add(pointLight1);
+        
+        const pointLight2 = new THREE.PointLight(0xffffff, 0.8, 50);
+        pointLight2.position.set(-10, -5, -10);
+        scene.add(pointLight2);
 
         // Add orbit controls
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
         controls.dampingFactor = 0.05;
 
+        // Load environment map for reflective material
+        const pmremGenerator = new THREE.PMREMGenerator(renderer);
+        pmremGenerator.compileEquirectangularShader();
+        
+        // Create a metal material
+        const createMetalMaterial = () => {
+            return new THREE.MeshStandardMaterial({
+                color: 0xC0C0C0, // Silver color
+                metalness: 1.0,
+                roughness: 0.2,
+                envMapIntensity: 1.0
+            });
+        };
+        
+        // Apply metal material to all meshes in a model
+        const applyMetalToModel = (model) => {
+            model.traverse((child) => {
+                if (child.isMesh) {
+                    child.material = createMetalMaterial();
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                }
+            });
+        };
+
+        // Load environment texture for reflections
+        new THREE.TextureLoader().load(
+            'https://threejs.org/examples/textures/2294472375_24a3b8ef46_o.jpg', 
+            function(texture) {
+                const envMap = pmremGenerator.fromEquirectangular(texture).texture;
+                scene.environment = envMap;
+                texture.dispose();
+                pmremGenerator.dispose();
+            }
+        );
+        
         // Load GLB model
         const loadingInfo = document.getElementById('loadingInfo');
         const loader = new GLTFLoader();
@@ -78,10 +128,12 @@
                 
                 // Add the original model to the group
                 const originalModel = gltf.scene.clone();
+                applyMetalToModel(originalModel);
                 modelGroup.add(originalModel);
                 
                 // Create a mirrored copy of the model
                 const mirroredModel = gltf.scene.clone();
+                applyMetalToModel(mirroredModel);
                 
                 // Apply a scaling transformation to mirror across the YZ plane (flip X axis)
                 mirroredModel.scale.set(-1, 1, 1);
