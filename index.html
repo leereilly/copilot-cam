@@ -37,10 +37,7 @@
 <body>
     <div class="loading-info" id="loadingInfo"></div>
     <video id="webcamVideo" autoplay playsinline muted style="display: none;"></video>
-    <video id="mp4Video" autoplay playsinline muted loop preload="auto" style="display: none;">
-        <source src="vid.mp4" type="video/mp4">
-        Your browser does not support the video tag.
-    </video>
+    <canvas id="gifCanvas" width="512" height="512" style="display: none;"></canvas>
     <!-- Include the script at the end of the body for better performance -->
     <script src="share-modal.js" defer></script>
     <script type="importmap">
@@ -165,67 +162,435 @@
         webcamTexture.minFilter = THREE.LinearFilter;
         webcamTexture.magFilter = THREE.LinearFilter;
         webcamTexture.format = THREE.RGBAFormat;
-        webcamTexture.wrapS = THREE.ClampToEdgeWrapping; // Changed from RepeatWrapping
-        webcamTexture.wrapT = THREE.ClampToEdgeWrapping; // Changed from RepeatWrapping
-        // Don't flip the webcam texture - we'll handle orientation in UV mapping
+        webcamTexture.wrapS = THREE.ClampToEdgeWrapping;
+        webcamTexture.wrapT = THREE.ClampToEdgeWrapping;
         webcamTexture.flipY = false;
         
-        // Initialize MP4 video
-        const mp4Video = document.getElementById('mp4Video');
-        let mp4Texture = null; // Don't create texture until video is ready
+        // Initialize GIF canvas for right lens
+        const gifCanvas = document.getElementById('gifCanvas');
+        const gifContext = gifCanvas.getContext('2d');
         
-        // Add event listeners for MP4 video
-        mp4Video.addEventListener('loadstart', () => {});
-        mp4Video.addEventListener('loadeddata', () => {
-            // Create texture now that data is loaded
-            if (!mp4Texture) {
-                mp4Texture = new THREE.VideoTexture(mp4Video);
-                mp4Texture.minFilter = THREE.LinearFilter;
-                mp4Texture.magFilter = THREE.LinearFilter;
-                mp4Texture.format = THREE.RGBAFormat;
-                mp4Texture.wrapS = THREE.ClampToEdgeWrapping;
-                mp4Texture.wrapT = THREE.ClampToEdgeWrapping;
-                mp4Texture.flipY = false;
+        // Create an initial colorful pattern on the canvas to test if texture is working
+        function createInitialTestPattern() {
+            console.log('Creating initial test pattern on GIF canvas');
+            
+            // Create a bright test pattern
+            gifContext.fillStyle = '#FF0000'; // Red background
+            gifContext.fillRect(0, 0, gifCanvas.width, gifCanvas.height);
+            
+            // Add some blue squares
+            gifContext.fillStyle = '#0000FF';
+            for (let i = 0; i < 4; i++) {
+                for (let j = 0; j < 4; j++) {
+                    if ((i + j) % 2 === 0) {
+                        gifContext.fillRect(i * 128, j * 128, 64, 64);
+                    }
+                }
             }
-            // Try to update right lens material now that data is loaded
-            setTimeout(() => updateRightLensWithMp4(), 100);
-        });
-        mp4Video.addEventListener('canplay', () => {
-            // Create texture if not already created
-            if (!mp4Texture) {
-                mp4Texture = new THREE.VideoTexture(mp4Video);
-                mp4Texture.minFilter = THREE.LinearFilter;
-                mp4Texture.magFilter = THREE.LinearFilter;
-                mp4Texture.format = THREE.RGBAFormat;
-                mp4Texture.wrapS = THREE.ClampToEdgeWrapping;
-                mp4Texture.wrapT = THREE.ClampToEdgeWrapping;
-                mp4Texture.flipY = false;
-            }
-            // Update right lens material when video can play
-            updateRightLensWithMp4();
-        });
-        mp4Video.addEventListener('canplaythrough', () => {});
-        mp4Video.addEventListener('playing', () => {
-            // Create texture if not already created
-            if (!mp4Texture) {
-                mp4Texture = new THREE.VideoTexture(mp4Video);
-                mp4Texture.minFilter = THREE.LinearFilter;
-                mp4Texture.magFilter = THREE.LinearFilter;
-                mp4Texture.format = THREE.RGBAFormat;
-                mp4Texture.wrapS = THREE.ClampToEdgeWrapping;
-                mp4Texture.wrapT = THREE.ClampToEdgeWrapping;
-                mp4Texture.flipY = false;
-            }
-            // Update right lens material when video starts playing
-            updateRightLensWithMp4();
-        });
-        mp4Video.addEventListener('error', (e) => {});
-        mp4Video.addEventListener('stalled', () => {});
-        mp4Video.addEventListener('suspend', () => {});
-        mp4Video.addEventListener('abort', () => {});
+            
+            // Add text
+            gifContext.fillStyle = '#FFFFFF';
+            gifContext.font = 'bold 32px Arial';
+            gifContext.textAlign = 'center';
+            gifContext.fillText('TEST', gifCanvas.width / 2, gifCanvas.height / 2);
+            gifContext.fillText('PATTERN', gifCanvas.width / 2, gifCanvas.height / 2 + 40);
+        }
         
-        // Try to start the MP4 video immediately
-        mp4Video.load(); // Explicitly load the video
+        // Create initial test pattern
+        createInitialTestPattern();
+        
+        let gifTexture = new THREE.CanvasTexture(gifCanvas);
+        gifTexture.minFilter = THREE.LinearFilter;
+        gifTexture.magFilter = THREE.LinearFilter;
+        gifTexture.format = THREE.RGBAFormat;
+        gifTexture.wrapS = THREE.ClampToEdgeWrapping;
+        gifTexture.wrapT = THREE.ClampToEdgeWrapping;
+        gifTexture.flipY = false;
+        gifTexture.needsUpdate = true;
+        
+        // GIF state management
+        let currentGifImage = null;
+        let currentGifVideo = null;
+        let gifFrames = [];
+        let currentFrameIndex = 0;
+        let gifFrameInterval = null;
+        let isGifLoaded = false;
+        let animationMode = 'none'; // 'video', 'image', 'fallback'
+        let videoLoopCount = 0;
+        let maxLoopsBeforeSwitch = 4;
+        let lastSelectedVideoIndex = -1;
+        
+        // Function to get random meme video from hardcoded list
+        function fetchRandomMemeGif() {
+            console.log('Loading random meme video from hardcoded list...');
+            
+            // Use predefined animated video URLs
+            const memeVideos = [
+                'https://media.giphy.com/media/l3q2K5jinAlChoCLS/giphy.mp4',
+                'https://media.giphy.com/media/LmNwrBhejkK9EFP504/giphy.mp4',
+                'https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExeWtsdmVyanI1YTQydHBjMmRjYm96ajhqd2h1Z3I4dWxuamdycDZrYSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/a7ZxXrkxd7S9eAl1Mr/giphy.mp4',
+                'https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExcWdzamhqenZubTE0YWRvcGlqZHkxcGtrMjhud3dyNXlidmIxYjg5ZiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/H5C8CevNMbpBqNqFjl/giphy.mp4',
+                'https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExNWdwNGV1ZmZpamRuaHdncHlnYzVzbWRjbHpmazBhcXo5dGh0bGIxeiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/AAsj7jdrHjtp6/giphy.mp4'
+            ];
+            
+            // Avoid selecting the same video consecutively
+            let randomIndex;
+            do {
+                randomIndex = Math.floor(Math.random() * memeVideos.length);
+            } while (randomIndex === lastSelectedVideoIndex && memeVideos.length > 1);
+            
+            lastSelectedVideoIndex = randomIndex;
+            const randomVideo = memeVideos[randomIndex];
+            console.log('Selected video URL:', randomVideo, 'at index:', randomIndex);
+            return randomVideo;
+        }
+        
+        // Function to load and play video with proper animation support
+        function loadGif() {
+            console.log('Loading animated video...');
+            
+            // Reset loop count for new video
+            videoLoopCount = 0;
+            
+            const videoUrl = fetchRandomMemeGif();
+            
+            if (videoUrl) {
+                console.log('Attempting to load animated video from:', videoUrl);
+                
+                // Try to load as video first (should work with MP4 URLs)
+                loadGifAsVideo(videoUrl).catch(error => {
+                    console.warn('Failed to load as video, using fallback:', error);
+                    createFallbackAnimation();
+                });
+            } else {
+                console.log('No video URL available, using fallback animation');
+                createFallbackAnimation();
+            }
+        }
+        
+        // Load video for animation support
+        function loadGifAsVideo(videoUrl) {
+            return new Promise((resolve, reject) => {
+                const video = document.createElement('video');
+                video.crossOrigin = 'anonymous';
+                video.autoplay = true;
+                video.loop = false; // Don't auto-loop so we can detect when it ends
+                video.muted = true;
+                video.playsInline = true;
+                
+                video.onloadeddata = () => {
+                    console.log('Video loaded successfully, dimensions:', video.videoWidth, 'x', video.videoHeight);
+                    currentGifVideo = video;
+                    isGifLoaded = true;
+                    startVideoGifAnimation();
+                    resolve();
+                };
+                
+                video.onerror = () => {
+                    reject(new Error('Failed to load video'));
+                };
+                
+                // Set timeout - shorter since we're using direct URLs
+                setTimeout(() => {
+                    if (!isGifLoaded) {
+                        reject(new Error('Video loading timeout'));
+                    }
+                }, 5000); // 5 second timeout
+                
+                video.src = videoUrl;
+            });
+        }
+        
+        // Fallback animation when video loading fails
+        function createFallbackAnimation() {
+            console.log('Creating enhanced fallback animation');
+            isGifLoaded = true;
+            animationMode = 'fallback';
+            
+            // Update right lens with fallback animation
+            updateRightLensWithGif();
+            
+            let animationFrame = 0;
+            
+            const animate = () => {
+                // Create a more interesting animated pattern
+                const time = animationFrame * 0.02;
+                
+                // Dynamic gradient background
+                const gradient = gifContext.createRadialGradient(
+                    gifCanvas.width / 2 + Math.sin(time) * 50, 
+                    gifCanvas.height / 2 + Math.cos(time * 1.3) * 50, 
+                    0,
+                    gifCanvas.width / 2, 
+                    gifCanvas.height / 2, 
+                    Math.max(gifCanvas.width, gifCanvas.height) / 2
+                );
+                gradient.addColorStop(0, `hsl(${(time * 50) % 360}, 70%, 60%)`);
+                gradient.addColorStop(0.5, `hsl(${(time * 50 + 120) % 360}, 80%, 50%)`);
+                gradient.addColorStop(1, `hsl(${(time * 50 + 240) % 360}, 70%, 60%)`);
+                
+                gifContext.fillStyle = gradient;
+                gifContext.fillRect(0, 0, gifCanvas.width, gifCanvas.height);
+                
+                // Add animated text with better effects
+                gifContext.fillStyle = 'white';
+                gifContext.font = 'bold 36px Arial';
+                gifContext.textAlign = 'center';
+                gifContext.shadowColor = 'black';
+                gifContext.shadowBlur = 5;
+                gifContext.shadowOffsetX = 2;
+                gifContext.shadowOffsetY = 2;
+                
+                // Bouncing text
+                const textY = gifCanvas.height / 2 + Math.sin(time * 3) * 10;
+                gifContext.fillText('🎭 MEME 🎭', gifCanvas.width / 2, textY - 40);
+                gifContext.fillText('ZONE', gifCanvas.width / 2, textY);
+                
+                // Add animated dots with different timing
+                const dots = Math.floor(time * 3) % 4;
+                gifContext.font = 'bold 24px Arial';
+                gifContext.fillText('.'.repeat(dots + 1), gifCanvas.width / 2, textY + 40);
+                
+                // Reset shadow
+                gifContext.shadowBlur = 0;
+                gifContext.shadowOffsetX = 0;
+                gifContext.shadowOffsetY = 0;
+                
+                // Add more animated shapes
+                for (let i = 0; i < 8; i++) {
+                    gifContext.fillStyle = `hsla(${(time * 100 + i * 45) % 360}, 80%, 70%, 0.7)`;
+                    const x = Math.sin(time + i * 0.8) * 120 + gifCanvas.width / 2;
+                    const y = Math.cos(time * 1.2 + i * 0.8) * 90 + gifCanvas.height / 2;
+                    const size = 15 + Math.sin(time * 4 + i) * 8;
+                    
+                    gifContext.beginPath();
+                    gifContext.arc(x, y, size, 0, Math.PI * 2);
+                    gifContext.fill();
+                }
+                
+                // Add morphing shapes
+                for (let i = 0; i < 4; i++) {
+                    gifContext.save();
+                    const x = 100 + i * 120;
+                    const y = 100 + Math.sin(time * 2 + i) * 60;
+                    gifContext.translate(x, y);
+                    gifContext.rotate(time * 2 + i * 1.5);
+                    
+                    // Morphing between square and circle
+                    const morphFactor = (Math.sin(time * 1.5 + i) + 1) / 2;
+                    gifContext.fillStyle = `hsla(${(time * 80 + i * 90) % 360}, 90%, 60%, 0.8)`;
+                    
+                    if (morphFactor < 0.5) {
+                        // Square
+                        const size = 20 + morphFactor * 10;
+                        gifContext.fillRect(-size / 2, -size / 2, size, size);
+                    } else {
+                        // Circle
+                        const radius = 15 + (morphFactor - 0.5) * 15;
+                        gifContext.beginPath();
+                        gifContext.arc(0, 0, radius, 0, Math.PI * 2);
+                        gifContext.fill();
+                    }
+                    
+                    gifContext.restore();
+                }
+                
+                // Add glitch effect occasionally
+                if (Math.random() < 0.05) {
+                    const glitchHeight = 10;
+                    const glitchY = Math.random() * (gifCanvas.height - glitchHeight);
+                    gifContext.fillStyle = `rgba(${Math.random() * 255}, ${Math.random() * 255}, ${Math.random() * 255}, 0.3)`;
+                    gifContext.fillRect(0, glitchY, gifCanvas.width, glitchHeight);
+                }
+                
+                gifTexture.needsUpdate = true;
+                animationFrame++;
+                
+                if (animationMode === 'fallback') {
+                    requestAnimationFrame(animate);
+                }
+            };
+            
+            animate();
+        }
+        
+        // Function to start video-based GIF animation
+        function startVideoGifAnimation() {
+            if (!currentGifVideo) {
+                console.warn('No GIF video available for animation');
+                return;
+            }
+            
+            console.log('Starting video GIF animation');
+            animationMode = 'video';
+            
+            // Update right lens with GIF now that it's loaded
+            updateRightLensWithGif();
+            
+            // Add event listener for video loop detection
+            currentGifVideo.addEventListener('ended', () => {
+                videoLoopCount++;
+                console.log(`Video loop ${videoLoopCount}/${maxLoopsBeforeSwitch} completed`);
+                
+                if (videoLoopCount >= maxLoopsBeforeSwitch) {
+                    console.log('Max loops reached, loading new video');
+                    // Stop current animation
+                    animationMode = 'none';
+                    isGifLoaded = false;
+                    // Load new video
+                    loadGif();
+                } else {
+                    // Continue with current video by restarting it
+                    console.log('Continuing with current video, restarting playback');
+                    currentGifVideo.currentTime = 0;
+                    currentGifVideo.play().catch(e => {
+                        console.warn('Failed to restart video:', e);
+                    });
+                }
+            });
+            
+            currentGifVideo.play().catch(e => {
+                console.warn('Failed to play video:', e);
+                // Fall back to image mode
+                startImageGifAnimation();
+            });
+            
+            let frame = 0;
+            const animateVideoGif = () => {
+                if (currentGifVideo && !currentGifVideo.paused) {
+                    // Clear and draw video frame
+                    gifContext.clearRect(0, 0, gifCanvas.width, gifCanvas.height);
+                    
+                    try {
+                        // Draw the video frame to canvas
+                        gifContext.drawImage(currentGifVideo, 0, 0, gifCanvas.width, gifCanvas.height);
+                        
+                        // Add subtle effects
+                        const time = frame * 0.01;
+                        gifContext.fillStyle = `rgba(255, 255, 255, ${0.02 + Math.sin(time) * 0.01})`;
+                        gifContext.fillRect(0, 0, gifCanvas.width, gifCanvas.height);
+                        
+                        gifTexture.needsUpdate = true;
+                        frame++;
+                        
+                        // Update material
+                        if (sharedGifMaterial) {
+                            sharedGifMaterial.map.needsUpdate = true;
+                            sharedGifMaterial.needsUpdate = true;
+                        }
+                    } catch (e) {
+                        console.warn('Error drawing video frame:', e);
+                    }
+                }
+                
+                if (animationMode === 'video') {
+                    requestAnimationFrame(animateVideoGif);
+                }
+            };
+            
+            animateVideoGif();
+        }
+        
+        // Function to start image-based GIF animation with enhanced effects
+        function startImageGifAnimation() {
+            if (!currentGifImage) {
+                console.warn('No GIF image available for animation');
+                return;
+            }
+            
+            console.log('Starting enhanced image GIF animation');
+            animationMode = 'image';
+            
+            // Update right lens with GIF now that it's loaded
+            updateRightLensWithGif();
+            
+            let frame = 0;
+            const animateImageGif = () => {
+                if (currentGifImage) {
+                    // Clear canvas
+                    gifContext.clearRect(0, 0, gifCanvas.width, gifCanvas.height);
+                    
+                    // Create animated background
+                    const time = frame * 0.02;
+                    const gradient = gifContext.createRadialGradient(
+                        gifCanvas.width / 2, gifCanvas.height / 2, 0,
+                        gifCanvas.width / 2, gifCanvas.height / 2, Math.max(gifCanvas.width, gifCanvas.height) / 2
+                    );
+                    gradient.addColorStop(0, `hsl(${(time * 30) % 360}, 20%, 10%)`);
+                    gradient.addColorStop(1, `hsl(${(time * 30 + 180) % 360}, 30%, 5%)`);
+                    
+                    gifContext.fillStyle = gradient;
+                    gifContext.fillRect(0, 0, gifCanvas.width, gifCanvas.height);
+                    
+                    // Draw main image with transformations
+                    gifContext.save();
+                    gifContext.translate(gifCanvas.width / 2, gifCanvas.height / 2);
+                    
+                    // Multiple animated layers of the same image for depth
+                    for (let layer = 0; layer < 3; layer++) {
+                        gifContext.save();
+                        
+                        const layerTime = time + layer * 0.5;
+                        const rotation = Math.sin(layerTime * 0.3) * 0.1;
+                        const scale = 0.7 + layer * 0.15 + Math.sin(layerTime * 0.5) * 0.05;
+                        const alpha = 0.3 + layer * 0.35;
+                        
+                        gifContext.rotate(rotation);
+                        gifContext.scale(scale, scale);
+                        gifContext.globalAlpha = alpha;
+                        
+                        // Add color tint for each layer
+                        if (layer === 1) {
+                            gifContext.filter = `hue-rotate(${(time * 20) % 360}deg) saturate(1.2)`;
+                        } else if (layer === 2) {
+                            gifContext.filter = `hue-rotate(${(time * -15) % 360}deg) contrast(1.1)`;
+                        }
+                        
+                        gifContext.drawImage(
+                            currentGifImage,
+                            -currentGifImage.width / 2,
+                            -currentGifImage.height / 2,
+                            currentGifImage.width,
+                            currentGifImage.height
+                        );
+                        
+                        gifContext.restore();
+                    }
+                    
+                    gifContext.restore();
+                    
+                    // Add animated overlay effects
+                    gifContext.fillStyle = `rgba(255, 255, 255, ${0.03 + Math.sin(time * 2) * 0.02})`;
+                    gifContext.fillRect(0, 0, gifCanvas.width, gifCanvas.height);
+                    
+                    // Add scanlines effect
+                    for (let y = 0; y < gifCanvas.height; y += 4) {
+                        gifContext.fillStyle = `rgba(0, 255, 255, ${0.02 + Math.sin(time + y * 0.1) * 0.01})`;
+                        gifContext.fillRect(0, y, gifCanvas.width, 1);
+                    }
+                    
+                    gifTexture.needsUpdate = true;
+                    frame++;
+                    
+                    // Update material
+                    if (sharedGifMaterial) {
+                        sharedGifMaterial.map.needsUpdate = true;
+                        sharedGifMaterial.needsUpdate = true;
+                    }
+                }
+                
+                if (animationMode === 'image') {
+                    requestAnimationFrame(animateImageGif);
+                }
+            };
+            
+            animateImageGif();
+        }
+        
+        // Load initial GIF
+        loadGif();
+        
+        // Videos will now switch automatically after 4 loops instead of on a timer
         
         // Use webcam as environment map
         const pmremGenerator = new THREE.PMREMGenerator(renderer);
@@ -295,20 +660,17 @@
             });
         };
         
-        // Create MP4 video material for right lens
-        const createMp4VideoMaterial = () => {
-            // Only create the material if the video is ready and texture exists
-            if (mp4Video.readyState < 2 || !mp4Texture) { // HAVE_CURRENT_DATA
-                return createMetalMaterial();
-            }
+        // Create GIF material for right lens
+        const createGifMaterial = () => {
+            console.log('Creating GIF material, isGifLoaded:', isGifLoaded);
             
-            // Use the MP4 texture directly
-            const texture = mp4Texture.clone();
+            // Always use the GIF texture (even if it just has test pattern initially)
+            const texture = gifTexture.clone();
             texture.needsUpdate = true;
             
-            // Fix upside-down video by flipping vertically
+            // Fix upside-down texture by flipping vertically
             texture.wrapT = THREE.RepeatWrapping;
-            texture.repeat.y = -1; // Flip vertically to fix upside-down video
+            texture.repeat.y = -1; // Flip vertically to fix upside-down texture
             texture.offset.y = 1;  // Adjust offset to compensate
             
             // For the mirrored side, flip the texture horizontally to counteract the geometric mirroring
@@ -318,16 +680,17 @@
             
             const material = new THREE.MeshStandardMaterial({
                 map: texture,
-                metalness: 0.0,  // Reduced metalness for better video visibility
-                roughness: 0.1,  // Lower roughness for clearer video
+                metalness: 0.0,  // Reduced metalness for better visibility
+                roughness: 0.1,  // Lower roughness for clearer display
                 side: THREE.DoubleSide,
                 transparent: false,
                 opacity: 1.0,
-                emissive: new THREE.Color(0x111111), // Slight emissive to make video more visible
+                emissive: new THREE.Color(0x111111), // Slight emissive to make content more visible
                 emissiveMap: texture,
                 emissiveIntensity: 0.3
             });
             
+            console.log('GIF material created with texture:', texture);
             return material;
         };
         
@@ -347,24 +710,34 @@
         let sharedVideoMaterial = null;
         let sharedMetalMaterial = null;
         let sharedSynthwaveEyesMaterial = null;
-        let sharedMp4VideoMaterial = null;
+        let sharedGifMaterial = null;
         
-        // Function to update right lens with MP4 video material once video is ready
-        function updateRightLensWithMp4() {
-            if (mp4Video.readyState >= 2 && mp4Texture) { // HAVE_CURRENT_DATA and texture exists
-                // Create the MP4 video material now that video is ready
-                const mp4VideoMaterial = createMp4VideoMaterial();
-                sharedMp4VideoMaterial = mp4VideoMaterial;
+        // Function to update right lens with GIF material once GIF is loaded
+        function updateRightLensWithGif() {
+            console.log('updateRightLensWithGif called, isGifLoaded:', isGifLoaded, 'gifTexture:', !!gifTexture);
+            
+            if (gifTexture) {
+                // Create the GIF material now that texture is ready
+                const gifMaterial = createGifMaterial();
+                sharedGifMaterial = gifMaterial;
+                
+                console.log('Created new GIF material:', gifMaterial);
                 
                 // Find and update all right lens meshes
+                let updatedCount = 0;
                 modelMaterials.forEach(item => {
                     if (item.isRightLens) {
-                        item.mesh.material = mp4VideoMaterial;
-                        item.material = mp4VideoMaterial;
+                        console.log('Updating right lens mesh:', item.meshName, 'at index:', item.meshIndex);
+                        item.mesh.material = gifMaterial;
+                        item.material = gifMaterial;
+                        updatedCount++;
                     }
                 });
                 
+                console.log('Updated', updatedCount, 'right lens meshes with GIF material');
                 return true; // Successfully updated
+            } else {
+                console.warn('gifTexture not available for right lens update');
             }
             return false; // Not ready yet
         }
@@ -548,7 +921,7 @@
                                         }
                                         // Apply the same material to all parts for seamless texture
                         modelMaterials.forEach(item => {
-                            // Apply appropriate materials: video to left lens, MP4 to right lens, synthwave to eyes, metal to others
+                            // Apply appropriate materials: video to left lens, GIF to right lens, synthwave to eyes, metal to others
                             if (item.isEyes) {
                                 // Eyes always keep their synthwave glow
                                 if (!sharedSynthwaveEyesMaterial) {
@@ -561,12 +934,12 @@
                                 item.mesh.material = videoMaterial;
                                 item.material = videoMaterial;
                             } else if (item.isRightLens) {
-                                // Right lens keeps the MP4 video
-                                if (!sharedMp4VideoMaterial) {
-                                    sharedMp4VideoMaterial = createMp4VideoMaterial();
+                                // Right lens keeps the GIF
+                                if (!sharedGifMaterial) {
+                                    sharedGifMaterial = createGifMaterial();
                                 }
-                                item.mesh.material = sharedMp4VideoMaterial;
-                                item.material = sharedMp4VideoMaterial;
+                                item.mesh.material = sharedGifMaterial;
+                                item.material = sharedGifMaterial;
                             } else {
                                 if (!sharedMetalMaterial) {
                                     sharedMetalMaterial = createMetalMaterial();
@@ -679,7 +1052,7 @@
                     }
                 });
                 
-                // Apply materials to the mirrored model (Metal initially, MP4 video will be applied once ready)
+                // Apply materials to the mirrored model (Metal initially, GIF will be applied once ready)
                 mirroredModel.traverse((child) => {
                     if (child.isMesh) {
                         const isEyes = child.name === 'Eyes';
@@ -690,7 +1063,7 @@
                             // Store reference to eye mesh for blinking animation
                             eyeMeshes.push(child);
                         } else if (isRightLens) {
-                            // Start with metal material, will update to MP4 once video is ready
+                            // Start with metal material, will update to GIF once ready
                             child.material = defaultMaterial;
                         } else {
                             child.material = defaultMaterial;
@@ -890,10 +1263,8 @@
                 webcamTexture.needsUpdate = true;
             }
             
-            // Always update MP4 video texture if it has data and texture exists
-            if (mp4Texture && mp4Video.readyState >= 2 && mp4Video.videoWidth > 0 && mp4Video.videoHeight > 0) {
-                mp4Texture.needsUpdate = true;
-            }
+            // GIF texture is updated automatically in the GIF animation functions
+            // No need to manually update here as it's handled by the canvas drawing
             
             controls.update(); // required if controls.enableDamping = true
             renderer.render(scene, camera);
@@ -904,14 +1275,9 @@
         // Set default mode to texture so video is visible on the model
         currentMode = 'texture'; 
         
-        // Debug function to manually start MP4 video (can be called from console)
-        window.startMp4Video = function() {
-            mp4Video.load();
-            return mp4Video.play().then(() => {
-                // MP4 video manually started
-            }).catch(e => {
-                // Failed to manually start MP4
-            });
+        // Debug function to manually refresh GIF (can be called from console)
+        window.refreshGif = function() {
+            loadGif();
         }; 
         
         // Automatically start webcam after page loads
@@ -920,31 +1286,10 @@
             setTimeout(() => {
                 startWebcam();
                 
-                // Start the MP4 video with better error handling
-                mp4Video.play().then(() => {
-                    // Try to update right lens material after a short delay
-                    setTimeout(() => {
-                        updateRightLensWithMp4();
-                    }, 500);
-                }).catch(e => {
-                    // Try alternative approach - user gesture might be required
-                    document.addEventListener('mousedown', function startVideoOnMouseDown() {
-                        mp4Video.play().then(() => {
-                            document.removeEventListener('mousedown', startVideoOnMouseDown);
-                            
-                            // Try to update right lens material after video starts
-                            setTimeout(() => {
-                                updateRightLensWithMp4();
-                            }, 500);
-                        }).catch(err => {
-                            // Still couldn't start MP4 video
-                        });
-                    }, { once: true });
-                });
-                
-                // Also try to update right lens material periodically until it succeeds
+                // GIF loading is handled automatically in the loadGif() function
+                // Try to update right lens material periodically until it succeeds
                 const retryInterval = setInterval(() => {
-                    if (updateRightLensWithMp4()) {
+                    if (updateRightLensWithGif()) {
                         clearInterval(retryInterval);
                     }
                 }, 1000); // Try every second
@@ -965,7 +1310,7 @@
                 currentMode = 'texture';
                 toggleModeButton.textContent = "Switch to Reflection Mode";
                 
-                // Apply video material only to left lens, MP4 to right lens, metal to others, eyes keep synthwave
+                // Apply video material only to left lens, GIF to right lens, metal to others, eyes keep synthwave
                 modelMaterials.forEach(item => {
                     if (item.isEyes) {
                         // Eyes always keep their synthwave glow
@@ -976,12 +1321,12 @@
                         item.mesh.material = videoMaterial;
                         item.material = videoMaterial;
                     } else if (item.isRightLens) {
-                        // Right lens keeps the MP4 video
-                        if (!sharedMp4VideoMaterial) {
-                            sharedMp4VideoMaterial = createMp4VideoMaterial();
+                        // Right lens keeps the GIF
+                        if (!sharedGifMaterial) {
+                            sharedGifMaterial = createGifMaterial();
                         }
-                        item.mesh.material = sharedMp4VideoMaterial;
-                        item.material = sharedMp4VideoMaterial;
+                        item.mesh.material = sharedGifMaterial;
+                        item.material = sharedGifMaterial;
                     } else {
                         if (!sharedMetalMaterial) {
                             sharedMetalMaterial = createMetalMaterial();
@@ -1008,17 +1353,17 @@
                     sharedMetalMaterial = createMetalMaterial();
                 }
                 
-                // Apply the same metal material to all parts except Eyes and right lens with MP4
+                // Apply the same metal material to all parts except Eyes and right lens with GIF
                 modelMaterials.forEach(item => {
                     if (item.isEyes) {
                         // Eyes always keep their synthwave glow
                         item.mesh.material = sharedSynthwaveEyesMaterial;
                     } else if (item.isRightLens) {
-                        // Right lens keeps the MP4 video even in reflection mode
-                        if (!sharedMp4VideoMaterial) {
-                            sharedMp4VideoMaterial = createMp4VideoMaterial();
+                        // Right lens keeps the GIF even in reflection mode
+                        if (!sharedGifMaterial) {
+                            sharedGifMaterial = createGifMaterial();
                         }
-                        item.mesh.material = sharedMp4VideoMaterial;
+                        item.mesh.material = sharedGifMaterial;
                     } else {
                         item.mesh.material = sharedMetalMaterial;
                     }
