@@ -6,7 +6,7 @@ This is vibe coding experiment with GitHub Copilot, Claude Sonnet 4.0, and lots 
 
 Built for GitHub's [For the Love of Code](https://gh.io/ftloc) hackathon.
 
-![Screenshot](https://repository-images.githubusercontent.com/1021742063/2bef4dd2-aff2-4b01-b652-35b71b7c8d3a)
+![Demo](demo.gif)
 
 ## Features
 
